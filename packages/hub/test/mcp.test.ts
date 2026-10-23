@@ -39,7 +39,7 @@ describe("MCP（道具の面）", () => {
   it("tools/list：code と台帳の3つ", async () => {
     const r = await rpc("tools/list");
     const names = (r.body!.result.tools as { name: string }[]).map((t) => t.name).sort();
-    expect(names).toEqual(["code", "ledger_export", "ledger_forget", "ledger_search"]);
+    expect(names).toEqual(["code", "ledger_export", "ledger_forget", "ledger_search", "route_stats"]);
   });
 
   it("code mode：実行環境（Worker Loader）から research.* を呼べる（Known Unknown の確認）", async () => {
@@ -170,6 +170,6 @@ describe("OAuth", () => {
     const { access_token } = (await tok.json()) as { access_token: string };
     const r = await rpc("tools/list", {}, { via: "self", token: access_token });
     expect(r.status).toBe(200);
-    expect((r.body!.result.tools as unknown[]).length).toBe(4);
+    expect((r.body!.result.tools as unknown[]).length).toBe(5);
   });
 });

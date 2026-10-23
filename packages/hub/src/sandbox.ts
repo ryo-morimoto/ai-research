@@ -4,6 +4,7 @@ import type { QuestionInput, ClaimInput } from "@ai-research/sandbox-api";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
+import { routeStub } from "./route.ts";
 
 /**
  * code mode の実行環境に渡す関数（docs/03 §2.3）。
@@ -13,6 +14,7 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
   const research: Record<string, (...args: unknown[]) => Promise<unknown>> = {
     start: async (q: unknown) => {
       const runId = `run_${crypto.randomUUID()}`;
+      await routeStub(env).noteResearchStart().catch(() => {});
       return runStub(env, runId).start(runId, q as QuestionInput, client);
     },
     next: async (runId: unknown, opts?: unknown) =>

@@ -2,15 +2,18 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import type { Env } from "./env.ts";
 import { handleMcp } from "./mcp.ts";
 import { authorize } from "./auth.ts";
+import { handleHook } from "./route.ts";
 
 export { LedgerDO } from "./ledger.ts";
 export { RunDO } from "./run.ts";
 export { HostLimiterDO } from "./limiter.ts";
+export { RouteDO } from "./route.ts";
 
 /**
  * ai-research のハブ（docs/02 §2）。
  *   /mcp        リモート MCP（OAuth で保護）
  *   /authorize  同意ページ（合言葉）
+ *   /hooks/*    Claude Code のフック（http）の受け口。経路の判断だけで、台帳には触れない
  */
 export const apiHandler = {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -23,6 +26,7 @@ const defaultHandler = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/authorize") return authorize(request, env);
+    if (url.pathname.startsWith("/hooks/")) return handleHook(request, env);
     if (url.pathname === "/") {
       return new Response("ai-research hub. MCP endpoint: /mcp\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     }

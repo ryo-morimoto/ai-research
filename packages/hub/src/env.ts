@@ -2,11 +2,14 @@ import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import type { LedgerDO } from "./ledger.ts";
 import type { RunDO } from "./run.ts";
 import type { HostLimiterDO } from "./limiter.ts";
+import type { RouteDO } from "./route.ts";
 
 export interface Env {
   LEDGER: DurableObjectNamespace<LedgerDO>;
   RUNS: DurableObjectNamespace<RunDO>;
   LIMITER: DurableObjectNamespace<HostLimiterDO>;
+  /** 経路の判断（フックの受け口） */
+  ROUTE: DurableObjectNamespace<RouteDO>;
   LOADER: WorkerLoader;
   OAUTH_KV: KVNamespace;
   OAUTH_PROVIDER: OAuthHelpers;

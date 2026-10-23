@@ -34,6 +34,7 @@ import type {
 import type { Env } from "./env.ts";
 import { Gateway, classifyUrl, type Doc } from "./gateway.ts";
 import { ledgerStub, type LedgerRecord } from "./ledger.ts";
+import { routeStub } from "./route.ts";
 import { deadlines, timeScale } from "./time.ts";
 
 /**
@@ -228,6 +229,10 @@ export class RunDO extends DurableObject<Env> {
   private addCutoff(v: number, cutoff: Cutoff): void {
     if (!this.current(v)) return;
     this.cutoffs.push({ cutoff, v, delivered: false });
+    // ai-research で取れなかった URL は、組み込みの取得に回してよい（U-03 の例外。理由は policy で絞る）
+    if (/^https?:\/\//.test(cutoff.what)) {
+      this.ctx.waitUntil(routeStub(this.env).noteCutoff(cutoff.what, cutoff.why).catch(() => {}));
+    }
     this.notify();
   }
 

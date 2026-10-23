@@ -1,0 +1,20 @@
+{
+  "description": "経路の判断はハブ（ai-research）が行う。届かないとき・2xx 以外のとき、http フックは止めない（組み込みの道具がそのまま動く）",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "http", "url": "https://ai-research.ryo-morimoto-dev.workers.dev/hooks/user-prompt-submit", "timeout": 3 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "WebSearch|WebFetch|web_search|web_fetch",
+        "hooks": [
+          { "type": "http", "url": "https://ai-research.ryo-morimoto-dev.workers.dev/hooks/pre-tool-use", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

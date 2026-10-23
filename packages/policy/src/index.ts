@@ -11,7 +11,7 @@ export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent
 
 export const POLICY = {
   name: "ai-research",
-  revision: "2026-10-24.2",
+  revision: "2026-10-24.3",
   deadlines: {
     /** research.start が束を返す締め切り（W-01） */
     startMs: 25_000,
@@ -63,6 +63,51 @@ export const POLICY = {
   ],
   search: { resultsPerQuery: 5, maxSourcesPerRun: 8, maxLedgerCandidates: 10 },
   userAgent: "ai-research/0.1 (+https://github.com/ryo-morimoto/ai-research)",
+  /** 経路の判断（制約 v0.6 U-03・Q-07、設計 v1.2 §7.6）。フックの受け口が使う */
+  routing: {
+    /** 経路の外の道具（組み込みのウェブ検索・取得）。Claude Code と Cowork の名前の両方 */
+    offPathTools: ["WebSearch", "WebFetch", "web_search", "web_fetch"],
+    /** URL を取る道具 */
+    fetchTools: ["WebFetch", "web_fetch"],
+    /**
+     * 利用者がウェブ検索を明示したとみなす言い方（正規表現、NFKC・小文字にした依頼文に当てる）。
+     * その回の依頼だけに効く。「WebSearch の代わりに」「使わず」のような否定は当てない
+     */
+    explicitPatterns: [
+      "(ウェブ|web|ネット)\\s*(で\\s*)?検索(で|して|を(使|つか)(っ|い|え|う(?!な)))",
+      "web\\s*_?(search|fetch)\\s*(で|を(使|つか)(っ|い|え|う(?!な))|して)",
+      "組み込みの(検索|取得)(で|を(使|つか)(っ|い|え|う(?!な)))",
+      "ai-?research\\s*(を使わず|を使わない|なしで|以外で)",
+    ],
+    /** ai-research で取れなかった URL を、組み込みの取得に回してよい理由。policy・robots は回さない（E-02） */
+    cutoffAllowReasons: ["blocked", "timeout", "error", "unsupported"],
+    /** 取れなかった URL を覚えておく時間 */
+    cutoffTtlMs: 30 * 60_000,
+    /** 会話ごとの明示の印を覚えておく時間（次の依頼で上書きされる） */
+    explicitTtlMs: 60 * 60_000,
+    /** 覚えておく会話の数の上限 */
+    maxSessions: 2_000,
+    /** 受け口が読む本文の上限 */
+    maxBodyBytes: 64 * 1024,
+  },
+} as const;
+
+/** 止めるときにモデルへ返す理由（ツールのエラーとして返る） */
+export const ROUTE_DENY_REASON = `この利用者の調べものは ai-research を通します（組み込みのウェブ検索・取得は止めています）。
+ai-research の code 道具（名前に ai-research と code を含む MCP の道具。遅延読み込みならツール検索で "ai-research" を探して読み込む）を使ってください。
+
+検索：
+  async () => research.start({ question: "解釈した問い", queries: ["検索語1", "検索語2", "検索語3"] })
+URL を読む：
+  async () => research.start({ question: "解釈した問い", queries: [], urls: ["https://…"] })
+
+ai-research で取れなかった URL（cutoffs の blocked / timeout / error / unsupported）は、このあと WebFetch で読めます。結果には「経路外（ai-research で取れなかった）」と書いてください。
+利用者がウェブ検索を明示したときだけ、組み込みのウェブ検索を使えます。`;
+
+/** 通すときにモデルへ添える文（Q-07） */
+export const ROUTE_ALLOW_CONTEXT = {
+  explicit: "利用者がウェブ検索を明示したので、組み込みの道具で調べます。結果には「経路外（利用者の指定）」と書き、確認済の印は付けないでください。",
+  cutoff: "ai-research で取れなかった URL なので、組み込みの取得で読みます。結果には「経路外（ai-research で取れなかった）」と書き、確認済の印は付けないでください。",
 } as const;
 
 export function hostPolicy(host: string): HostPolicy {
@@ -149,7 +194,7 @@ let cachedVersion: string | undefined;
 /** 手順・方針・上限・説明文の内容ハッシュ（実行記録の procedure_version） */
 export async function procedureVersion(): Promise<string> {
   if (!cachedVersion) {
-    const h = await textHash(JSON.stringify({ POLICY, CODE_TOOL_DESCRIPTION }));
+    const h = await textHash(JSON.stringify({ POLICY, CODE_TOOL_DESCRIPTION, ROUTE_DENY_REASON, ROUTE_ALLOW_CONTEXT }));
     cachedVersion = `${POLICY.revision}+${h.slice(0, 12)}`;
   }
   return cachedVersion;

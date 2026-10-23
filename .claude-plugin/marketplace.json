@@ -1,0 +1,12 @@
+{
+  "name": "ai-research",
+  "owner": { "name": "ryo-morimoto" },
+  "metadata": { "description": "ai-research（出典つきの調査ハブ）を、指示しなくても調べものの既定の経路にするプラグイン" },
+  "plugins": [
+    {
+      "name": "ai-research",
+      "source": "./plugins/ai-research",
+      "description": "調べものを ai-research コネクタに通す。スキル ai-research-first（全面）と、組み込みの WebSearch / WebFetch を止めて案内するフック（Claude Code・Cowork）"
+    }
+  ]
+}

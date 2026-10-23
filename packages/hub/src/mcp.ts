@@ -5,6 +5,7 @@ import { CODE_TOOL_DESCRIPTION, INSTRUCTIONS, POLICY } from "@ai-research/policy
 import type { Executor } from "@cloudflare/codemode";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
+import { routeStub } from "./route.ts";
 import { providers, makeExecutor } from "./sandbox.ts";
 
 const MAX_RESULT_CHARS = 60_000;
@@ -66,6 +67,16 @@ export function buildServer(env: Env, opts: { executor?: Executor; client?: stri
     "ledger_export",
     { description: "台帳を JSONL で書き出す。読み取りだけ", inputSchema: {}, annotations: { readOnlyHint: true } },
     async () => text(await ledgerStub(env).exportJsonl()),
+  );
+
+  server.registerTool(
+    "route_stats",
+    {
+      description: "経路の計数（日ごと）。組み込みのウェブ検索・取得を止めた回数、例外で通した回数、research.start の回数。読み取りだけ",
+      inputSchema: { days: z.number().int().min(1).max(90).optional() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ days }) => text(await routeStub(env).stats(days ?? 14)),
   );
 
   return server;
