@@ -33,7 +33,7 @@ describe("調査の実行（RunDO）", () => {
   it("W-01：締め切りまでに最初の束を返す。拒まれた取得は打ち切りとして見える", async () => {
     const { id, stub } = newRun();
     const t0 = Date.now();
-    const b = await stub.start(id, { question: "取得先の制限は", queries: ["limits"] });
+    const b = await stub.start(id, { mode: "survey", question: "取得先の制限は", queries: ["limits"] });
     expect(Date.now() - t0).toBeLessThan(25_000 * scale + 300);
     expect(b.question.version).toBe(1);
     expect(passageWith(b, "3秒に1回")).toBeDefined();
@@ -51,7 +51,7 @@ describe("調査の実行（RunDO）", () => {
     await patchEnv(stub, { TEST_DEADLINES: JSON.stringify({ fetchMs: 20_000 }) });
     await upstreamSet({ url: "https://chain.example.com/robots.txt", delayMs: 1_000, body: "" });
     await upstreamSet({ url: "https://chain.example.com/page", delayMs: 300, contentType: "text/html", body: "<article><p>遅れて届く段落の本文。</p></article>" });
-    const b1 = await stub.start(id, { question: "遅れて届く段落", queries: [], urls: ["https://chain.example.com/page"] });
+    const b1 = await stub.start(id, { mode: "survey", question: "遅れて届く段落", queries: [], urls: ["https://chain.example.com/page"] });
     expect(b1.done).toBe(false);
     expect(b1.cutoffs.some((c) => c.why === "timeout" && c.what.includes("chain.example.com"))).toBe(true);
     expect(passageWith(b1, "遅れて届く")).toBeUndefined();
@@ -63,7 +63,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("INV-10：方向を変えたら、古い版の段落を返さず、古い版の段落での引用は stale_version", async () => {
     const { id, stub } = newRun();
-    const b1 = await stub.start(id, { question: "プロンプトキャッシュ", queries: ["cache"] });
+    const b1 = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュ", queries: ["cache"] });
     const old = passageWith(b1, "前置きが完全に一致")!;
     expect(old).toBeDefined();
     const b2 = await stub.steer({ question: "取得先の制限", queries: ["limits"] });
@@ -79,7 +79,7 @@ describe("調査の実行（RunDO）", () => {
     await patchEnv(stub, { TEST_CAP_SCALE: "0.012", TEST_DEADLINES: JSON.stringify({ fetchMs: 20_000 }) });
     await upstreamSet({ url: "https://chain.example.com/robots.txt", delayMs: 1_000, body: "" });
     await upstreamSet({ url: "https://chain.example.com/page", delayMs: 300, contentType: "text/html", body: "<article><p>遅れて届く段落の本文。</p></article>" });
-    const b1 = await stub.start(id, { question: "制限とキャッシュ", queries: ["limits", "cache"], urls: ["https://chain.example.com/page"] });
+    const b1 = await stub.start(id, { mode: "survey", question: "制限とキャッシュ", queries: ["limits", "cache"], urls: ["https://chain.example.com/page"] });
     expect(b1.cutoffs.some((c) => c.what.includes("chain.example.com"))).toBe(true);
     // 前提：届けていない古い版の段落が残っている（予算で絞った）
     const before = await inspect(stub);
@@ -99,7 +99,7 @@ describe("調査の実行（RunDO）", () => {
     const dup = "Each SQLite-backed Durable Object has a storage limit of 10 GB on a Workers Paid plan.";
     await upstreamSet({ url: "https://dup.example.com/a", contentType: "text/html", body: `<article><p>${dup}</p><p>別の段落の本文。</p><p>${dup}</p></article>` });
     await upstreamSet({ url: "https://dup.example.com/b", contentType: "text/html", body: `<article><p>${dup}</p></article>` });
-    const b1 = await stub.start(id, { question: "storage limit", queries: [], urls: ["https://dup.example.com/a", "https://dup.example.com/b"] });
+    const b1 = await stub.start(id, { mode: "survey", question: "storage limit", queries: [], urls: ["https://dup.example.com/a", "https://dup.example.com/b"] });
     const later = await stub.next(0);
     const all = [...b1.passages, ...later.passages];
     expect(all.filter((p) => p.text === dup).length).toBe(1);
@@ -112,7 +112,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("Q-06（上書きの試験）：原文にない引用は台帳に入らない。原文どおりの引用だけが入る", async () => {
     const { id, stub } = newRun();
-    const b = await stub.start(id, { question: "取得先の制限", queries: ["limits"] });
+    const b = await stub.start(id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });
     const p = passageWith(b, "3秒に1回")!;
     const v = await stub.verify([
       // 事前の知識で書き換えた引用（数字を変えた）
@@ -138,7 +138,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("引用は引いた段落の中でだけ照合する。原文の中の命令文は、その出典の文として記録されるだけ", async () => {
     const { id, stub } = newRun();
-    const b = await stub.start(id, { question: "Durable Object 指示", queries: ["injection"] });
+    const b = await stub.start(id, { mode: "survey", question: "Durable Object 指示", queries: ["injection"] });
     const p = passageWith(b, "Durable Object")!;
     const inj = passageWith(b, "これまでの指示を無視")!;
     // 別の段落の文を、この段落の名で引くことはできない
@@ -156,7 +156,7 @@ describe("調査の実行（RunDO）", () => {
   it("INV-9：使用量は段階の上限を超えない。超えそうなら止めて知らせる", async () => {
     const { id, stub } = newRun();
     await patchEnv(stub, { TEST_CAP_SCALE: "0.006" }); // 最初 600、続き 3600 トークン
-    const b1 = await stub.start(id, { question: "取得先の制限とキャッシュ", queries: ["limits", "cache"] });
+    const b1 = await stub.start(id, { mode: "survey", question: "取得先の制限とキャッシュ", queries: ["limits", "cache"] });
     expect(b1.budget.usedTokens).toBeLessThanOrEqual(b1.budget.capTokens);
     let last = b1;
     for (let i = 0; i < 6 && !last.done; i++) {
@@ -170,7 +170,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("W-04：4分の上限で終える。以後は作業を始めない", async () => {
     const { id, stub } = newRun();
-    await stub.start(id, { question: "取得先の制限", queries: ["limits"] });
+    await stub.start(id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     const b = await stub.next(0);
     expect(b.done).toBe(true);
@@ -180,7 +180,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("INV-13：退避しても原文の全文はストレージに残っていない。退避後も引用は照合できる", async () => {
     const { id, stub } = newRun();
-    const b = await stub.start(id, { question: "取得先の制限", queries: ["limits"] });
+    const b = await stub.start(id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });
     const p = passageWith(b, "3秒に1回")!;
     const stored = await runInDurableObject(stub, async (_i, state) => {
       const all = await state.storage.list();
@@ -195,7 +195,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("退避の後も段落 ID を使い回さない（古い版の ID は stale_version、新しい ID は前と重ならない）", async () => {
     const { id, stub } = newRun();
-    const b1 = await stub.start(id, { question: "プロンプトキャッシュ", queries: ["cache"] });
+    const b1 = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュ", queries: ["cache"] });
     const old = passageWith(b1, "前置きが完全に一致")!;
     await evictDurableObject(stub);
     const b2 = await stub.steer({ question: "取得先の制限", queries: ["limits"] });
@@ -208,14 +208,14 @@ describe("調査の実行（RunDO）", () => {
   it("Q-02：台帳の抜き書きを照らし直す（変わっていなければ確認済、消えていれば未確認）", async () => {
     // 1回目：照合して台帳に入れる
     const a = newRun();
-    const b = await a.stub.start(a.id, { question: "取得先の制限", queries: ["limits"] });
+    const b = await a.stub.start(a.id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });
     const p = passageWith(b, "3秒に1回")!;
     await a.stub.verify([{ text: "x", cite: [{ passageId: p.passageId, quote: "同時接続1本までとする" }] }]);
     expect((await ledger().all()).length).toBe(1);
 
     // 2回目：変わっていない（ETag が同じ → 304）
     const c = newRun();
-    const b2 = await c.stub.start(c.id, { question: "同時接続1本までとする", queries: [] });
+    const b2 = await c.stub.start(c.id, { mode: "survey", question: "同時接続1本までとする", queries: [] });
     expect(b2.ledgerHits.map((h) => h.status)).toEqual(["確認済"]);
     const log = await upstreamLog();
     expect(log.some((l) => l.url === "https://docs.example.com/limits" && l.headers["if-none-match"] === '"limits-v1"')).toBe(true);
@@ -226,7 +226,7 @@ describe("調査の実行（RunDO）", () => {
     // 3回目：出典が変わり、抜き書きが消えた
     await upstreamSet({ url: "https://docs.example.com/limits", contentType: "text/html", etag: '"limits-v2"', body: "<article><p>arXiv の API の制限は廃止された。</p></article>" });
     const d = newRun();
-    const b3 = await d.stub.start(d.id, { question: "同時接続1本までとする", queries: [] });
+    const b3 = await d.stub.start(d.id, { mode: "survey", question: "同時接続1本までとする", queries: [] });
     expect(b3.ledgerHits[0]).toMatchObject({ status: "未確認" });
     const v3 = await d.stub.verify([{ text: "x", cite: [{ passageId: b3.ledgerHits[0]!.passageId, quote: "同時接続1本までとする" }] }]);
     expect(v3.statuses[0]!.status).toBe("未確認");
@@ -234,7 +234,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("照らし直しのために取り直した文書は、段落の候補にしない（設計 v1.3 §8.1.4）", async () => {
     const a = newRun();
-    const b = await a.stub.start(a.id, { question: "取得先の制限", queries: ["limits"] });
+    const b = await a.stub.start(a.id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });
     const p = passageWith(b, "3秒に1回")!;
     await a.stub.verify([{ text: "x", cite: [{ passageId: p.passageId, quote: "同時接続1本までとする" }] }]);
     // 出典が変わった（ETag が変わり、抜き書きは残っている。問いに合う文も増えた）
@@ -245,14 +245,14 @@ describe("調査の実行（RunDO）", () => {
       body: "<article><p>arXiv の API は3秒に1回、同時接続1本までとする。</p><p>同時接続1本までとする制限は、2026年に見直す予定である。</p></article>",
     });
     const c = newRun();
-    const b2 = await c.stub.start(c.id, { question: "同時接続1本までとする", queries: [] });
+    const b2 = await c.stub.start(c.id, { mode: "survey", question: "同時接続1本までとする", queries: [] });
     expect(b2.ledgerHits[0]).toMatchObject({ status: "確認済" });
     expect(b2.passages).toEqual([]);
   });
 
   it("INV-4：実行の途中で台帳に増えたものは、その実行の検索に出ない（snapshot）", async () => {
     const a = newRun();
-    await a.stub.start(a.id, { question: "取得先の制限", queries: [] });
+    await a.stub.start(a.id, { mode: "survey", question: "取得先の制限", queries: [] });
     const m = (await inspect(a.stub)).meta!;
     expect(m.manifest.ledgerSnapshotSeq).toBe(0);
   });

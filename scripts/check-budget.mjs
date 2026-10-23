@@ -22,7 +22,7 @@ const description = (front ?? "").match(/^description:\s*(.*)$/m)?.[1] ?? "";
 // 上限は推定トークン（core の estimateTokens。CJK 1字=1、その他3字=1）
 const BUDGETS = [
   { name: "サーバーの説明文（INSTRUCTIONS）", text: policy.INSTRUCTIONS, max: 80 },
-  { name: "code の道具の説明文（CODE_TOOL_DESCRIPTION）", text: policy.CODE_TOOL_DESCRIPTION, max: Number(process.env.BUDGET_CODE_TOOL ?? 1600) },
+  { name: "code の道具の説明文（CODE_TOOL_DESCRIPTION）", text: policy.CODE_TOOL_DESCRIPTION, max: Number(process.env.BUDGET_CODE_TOOL ?? 1200) },
   { name: "スキルの説明文", text: description, max: 120 },
   { name: "スキルの本文", text: body ?? "", max: 150 },
   { name: "フックが止めるときの文（ROUTE_DENY_REASON）", text: policy.ROUTE_DENY_REASON, max: 450 },

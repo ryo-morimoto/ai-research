@@ -18,7 +18,7 @@ function failingRuns(message: string, extra: Record<string, unknown> = {}): type
 describe("実行環境との境界（P-05、設計 v1.3 D12）", () => {
   it("ストレージの時間切れ・過負荷は busy（再試行してよい）として値で返す。例外にしない", async () => {
     const { research } = fns(failingRuns("Durable Object storage operation exceeded timeout which caused object to be reset."));
-    const r = await research.start!({ question: "x", queries: ["a"] });
+    const r = await research.start!({ question: "x", mode: "survey", queries: ["a"] });
     expect(r.error).toMatchObject({ code: "busy", retryable: true });
     expect(r.error.next).toContain("もう一度");
     const n = await research.next!("run_0123456789abcdef", { waitMs: 0 });
@@ -33,7 +33,9 @@ describe("実行環境との境界（P-05、設計 v1.3 D12）", () => {
     expect(r.error).toMatchObject({ code: "bad_input", retryable: true });
     expect(r.error.message).toContain("start.question");
     expect((await research.next!("not-a-run-id")).error.code).toBe("bad_input");
-    expect((await research.start!({ question: "x", urls: ["not a url"] })).error.message).toContain("start.urls");
+    // 依頼の種類は必ず選ぶ（D9）
+    expect((await research.start!({ question: "x", queries: ["a"] })).error.message).toContain("start.mode");
+    expect((await research.start!({ question: "x", mode: "lookup", urls: ["not a url"] })).error.message).toContain("start.urls");
   });
 
   it("ない runId は run_not_found（start からやり直す）", async () => {

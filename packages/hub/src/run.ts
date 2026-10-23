@@ -21,6 +21,7 @@ import {
 } from "@ai-research/core";
 import { POLICY, procedureVersion } from "@ai-research/policy";
 import type {
+  Mode,
   Bundle,
   ClaimInput,
   ClaimStatus,
@@ -37,6 +38,7 @@ import { ledgerStub, type LedgerRecord } from "./ledger.ts";
 import { routeStub } from "./route.ts";
 import { deadlines, timeScale } from "./time.ts";
 import { timed } from "./obs.ts";
+import { presentCutoffs, type CutoffOrigin } from "./cutoffs.ts";
 
 /**
  * 1つの調査の実行（docs/03 §2.5.1、specs/run.qnt）。1依頼に1つ（idFromName(runId)）。
@@ -63,8 +65,8 @@ type HitEntry = {
   verifiedText?: string;
   fingerprint?: Fingerprint;
 };
-type TaskEntry = { id: number; v: number; label: string; done: boolean; controller: AbortController; deep: boolean; startedAt: number };
-type CutoffEntry = { cutoff: Cutoff; v: number; delivered: boolean };
+type TaskEntry = { id: number; v: number; label: string; origin: CutoffOrigin; done: boolean; controller: AbortController; deep: boolean; startedAt: number };
+type CutoffEntry = { cutoff: Cutoff; origin: CutoffOrigin; v: number; delivered: boolean };
 
 type Manifest = {
   runId: string;
@@ -87,7 +89,7 @@ type Meta = {
   exclusions?: string[];
   queries: string[];
   urls: string[];
-  depth: "first" | "standard";
+  mode: Mode;
   deep: boolean;
   budget: BudgetState;
   done: boolean;
@@ -187,19 +189,19 @@ export class RunDO extends DurableObject<Env> {
   // ---- 作業 -----------------------------------------------------------------
 
   /** 作業を始める（INV-11：深掘りでなければ4分を過ぎて始めない） */
-  private spawn(v: number, label: string, fn: (signal: AbortSignal) => Promise<void>): boolean {
+  private spawn(v: number, label: string, origin: CutoffOrigin, fn: (signal: AbortSignal) => Promise<void>): boolean {
     const m = this.meta!;
     if (m.done) return false;
     if (!m.deep && this.elapsedPolicyMs() >= deadlines(this.env).continueUntilMs) return false;
     const id = ++this.counters.task;
     const controller = new AbortController();
-    const task: TaskEntry = { id, v, label, done: false, controller, deep: m.deep, startedAt: Date.now() };
+    const task: TaskEntry = { id, v, label, origin, done: false, controller, deep: m.deep, startedAt: Date.now() };
     this.tasks.set(id, task);
     this.log("task_start", { id, v, label });
     fn(controller.signal)
       .catch((e) => {
         if (v === this.meta?.version && !controller.signal.aborted) {
-          this.cutoffs.push({ cutoff: { what: label, why: "error", detail: String(e).slice(0, 200) }, v, delivered: false });
+          this.cutoffs.push({ cutoff: { what: label, why: "error", detail: String(e).slice(0, 200) }, origin, v, delivered: false });
         }
       })
       .finally(() => {
@@ -230,9 +232,9 @@ export class RunDO extends DurableObject<Env> {
     return sourceId;
   }
 
-  private addCutoff(v: number, cutoff: Cutoff): void {
+  private addCutoff(v: number, cutoff: Cutoff, origin: CutoffOrigin): void {
     if (!this.current(v)) return;
-    this.cutoffs.push({ cutoff, v, delivered: false });
+    this.cutoffs.push({ cutoff, origin, v, delivered: false });
     // ai-research で取れなかった URL は、組み込みの取得に回してよい（U-03 の例外。理由は policy で絞る）
     if (/^https?:\/\//.test(cutoff.what)) {
       this.ctx.waitUntil(routeStub(this.env).noteCutoff(cutoff.what, cutoff.why).catch(() => {}));
@@ -244,40 +246,43 @@ export class RunDO extends DurableObject<Env> {
     const m = this.meta!;
     const maxSources = POLICY.search.maxSourcesPerRun * (m.deep ? 2 : 1);
 
-    const fetchUrl = (url: string) => {
+    const mode = POLICY.modes[m.mode];
+    const fetchUrl = (url: string, origin: CutoffOrigin) => {
       if (this.fetchedUrls.has(url) || this.fetchedUrls.size >= maxSources) return;
       this.fetchedUrls.add(url);
-      this.spawn(v, `取得: ${url}`, async (signal) => {
+      this.spawn(v, `取得: ${url}`, origin, async (signal) => {
         const r = await this.gw().withSignal(signal).fetchDoc(url);
         if (!this.current(v)) return;
         if (r.ok && "doc" in r) this.addDoc(v, r.doc);
-        else if (!r.ok) this.addCutoff(v, r.cutoff);
+        else if (!r.ok) this.addCutoff(v, r.cutoff, origin);
       });
     };
 
     // 台帳から候補を選び、照らし直す（W-03、Q-02）
-    this.spawn(v, "台帳の検索", async () => {
+    this.spawn(v, "台帳の検索", "system", async () => {
       const ledger = ledgerStub(this.env);
-      const records = await ledger.search([opts.question, ...opts.queries], { snapshotSeq: m.manifest.ledgerSnapshotSeq, limit: POLICY.ledger.show });
+      const records = await ledger.search([opts.question, ...opts.queries], { snapshotSeq: m.manifest.ledgerSnapshotSeq, limit: mode.ledgerShow });
       if (!this.current(v)) return;
       for (const record of records) {
         if ([...this.hits.values()].some((h) => h.v === v && h.record.recordId === record.recordId)) continue;
         const passageId = `h${++this.counters.hit}`;
         const hit: HitEntry = { passageId, v, record, status: "照合中", deliveredStatus: null };
         this.hits.set(passageId, hit);
-        this.spawn(v, `照らし直し: ${record.url}`, async (signal) => this.revalidate(v, hit, signal));
+        this.spawn(v, `照らし直し: ${record.url}`, "ledger", async (signal) => this.revalidate(v, hit, signal));
       }
       this.notify();
     });
 
-    for (const url of opts.urls) fetchUrl(url);
+    for (const url of opts.urls) fetchUrl(url, "url");
 
-    for (const q of opts.queries) {
-      this.spawn(v, `検索: ${q}`, async (signal) => {
+    // lookup で URL があれば検索しない（利用者が示した出典だけを読む。設計 v1.3 §8.1.2）
+    const queries = opts.urls.length > 0 && !mode.searchWithUrls ? [] : opts.queries;
+    for (const q of queries) {
+      this.spawn(v, `検索: ${q}`, "system", async (signal) => {
         const r = await this.gw().withSignal(signal).search(q);
         if (!this.current(v)) return;
-        if (!r.ok) return this.addCutoff(v, r.cutoff);
-        for (const h of r.hits) fetchUrl(h.url);
+        if (!r.ok) return this.addCutoff(v, r.cutoff, "system");
+        for (const h of r.hits) fetchUrl(h.url, "search");
       });
     }
   }
@@ -399,16 +404,22 @@ export class RunDO extends DurableObject<Env> {
       });
 
     // INV-8：締め切りで終わっていない現在の版の作業を、すべて cutoffs に入れる
-    const running: Cutoff[] = this.unfinished(v).map((t) => ({
-      what: t.label,
-      why: "timeout",
-      detail: m.done ? "4分の上限で打ち切った" : "締め切りまでに終わらず、続けて集めている",
+    const running = this.unfinished(v).map((t) => ({
+      origin: t.origin,
+      cutoff: {
+        what: t.label,
+        why: "timeout",
+        detail: m.done ? "締め切りで打ち切った" : "締め切りまでに終わらず、続けて集めている",
+      } as Cutoff,
     }));
     const pendingCutoffs = this.cutoffs.filter((c) => c.v === v && !c.delivered);
-    const cutoffs = [...pendingCutoffs.map((c) => c.cutoff), ...running];
+    const cutoffItems = [...pendingCutoffs.map((c) => ({ cutoff: c.cutoff, origin: c.origin })), ...running];
+    // 答えに影響しうるものは1件ずつ、検索で見つけたページの失敗はまとめる（Q-04）
+    const cutoffs = presentCutoffs(cutoffItems);
 
     const base: Bundle = {
       runId: m.runId,
+      mode: m.mode,
       question: { version: v, text: m.question },
       ledgerHits: hitsOut,
       passages: [],
@@ -438,8 +449,8 @@ export class RunDO extends DurableObject<Env> {
     }
     const selected = selectPassages(candidates, [m.question, ...m.queries], {
       passageMaxChars: POLICY.limits.passageMaxChars,
-      passagesPerBundle: POLICY.limits.passagesPerBundle,
-      passagesPerSource: POLICY.limits.passagesPerSource,
+      passagesPerBundle: POLICY.modes[m.mode].passagesPerBundle,
+      passagesPerSource: POLICY.modes[m.mode].passagesPerSource,
       maxTokens: Math.min(POLICY.limits.bundleMaxTokens, remaining),
       minRatio: POLICY.passages.minRatio,
     });
@@ -486,6 +497,7 @@ export class RunDO extends DurableObject<Env> {
       hits: bundle.ledgerHits.map((h) => h.passageId),
       cutoffTasks: this.unfinished(v).map((t) => t.id),
       cutoffs: bundle.cutoffs.length,
+      cutoffItems: cutoffItems.length,
       used: m.budget.used,
       phase,
       cap,
@@ -526,7 +538,7 @@ export class RunDO extends DurableObject<Env> {
       question,
       queries,
       urls,
-      depth: input.depth === "first" ? "first" : "standard",
+      mode: input.mode,
       deep: false,
       budget: { used: 0, phase: "first", stopped: false },
       done: false,
@@ -544,14 +556,18 @@ export class RunDO extends DurableObject<Env> {
   }
 
   private async firstBundle(v: number): Promise<Bundle> {
-    await this.waitUntil(() => !this.current(v) || this.unfinished(v).length === 0, deadlines(this.env).startMs);
     const m = this.meta!;
+    const mode = POLICY.modes[m.mode];
+    await this.waitUntil(() => !this.current(v) || this.unfinished(v).length === 0, mode.startMs);
+    // 続きを集めない種類（lookup）は、最初の束で終える。残りの作業は止める（設計 v1.3 §8.1.2）
+    const ends = !mode.continues && !m.deep;
+    if (ends) this.finish();
     const b = this.buildBundle();
+    if (ends) this.abortAll();
     if (!m.firstReturned) {
       m.firstReturned = true;
       // 最初の結果を返したら「続き」の段階に進む（R-01 の上限が上がる）
-      if (m.depth === "standard") m.budget = advance(m.budget, "continue", this.caps());
-      else m.done = true;
+      if (mode.continues) m.budget = advance(m.budget, "continue", this.caps());
     }
     await this.save();
     return b;
@@ -703,17 +719,33 @@ export class RunDO extends DurableObject<Env> {
     this.notify();
   }
 
+  private abortAll(): void {
+    for (const t of this.tasks.values()) if (!t.done) t.controller.abort();
+  }
+
   override async alarm(): Promise<void> {
     const m = await this.load();
     if (!m || m.deep) return;
     this.finish();
-    for (const t of this.tasks.values()) if (!t.done) t.controller.abort();
+    this.abortAll();
     await this.save();
+  }
+
+  /** 答えが出たら止める（survey。設計 v1.3 §3）。調査がなければ false */
+  async close(): Promise<boolean> {
+    const m = await this.load();
+    if (!m) return false;
+    this.finish();
+    this.abortAll();
+    this.log("close", { v: m.version });
+    await this.save();
+    return true;
   }
 
   private notFoundBundle(runId: string, notice: Notice): Bundle {
     return {
       runId,
+      mode: "survey",
       question: { version: 0, text: "" },
       ledgerHits: [],
       passages: [],

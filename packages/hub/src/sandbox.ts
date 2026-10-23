@@ -60,6 +60,10 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       const id = parse(RunIdInput, runId, "runId");
       return notFound((await runStub(env, id).deepen()) as Bundle, id);
     }, firstArg),
+    close: guarded(async (runId: unknown) => {
+      const id = parse(RunIdInput, runId, "runId");
+      return (await runStub(env, id).close()) ? { closed: true } : runNotFound(id);
+    }, firstArg),
   };
   const ledger: Record<string, Fn> = {
     search: guarded(async (text: unknown) => {

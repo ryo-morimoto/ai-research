@@ -61,7 +61,7 @@ export function checkRunTrace(events: Ev[], opts: { timeScale: number; continueU
         const runningNow = [...running.entries()].filter(([, tv]) => tv === v).map(([id]) => id).sort((a, b) => a - b);
         const reported = [...(e.cutoffTasks as number[])].sort((a, b) => a - b);
         expect(reported, "INV-8：終わっていない作業はすべて打ち切りとして数える").toEqual(runningNow);
-        expect(e.cutoffs as number, "INV-8：束の cutoffs に入っている").toBeGreaterThanOrEqual(runningNow.length);
+        expect((e.cutoffItems ?? e.cutoffs) as number, "INV-8：束の cutoffs に入っている（まとめる前の件数）").toBeGreaterThanOrEqual(runningNow.length);
         expect(e.used as number, "INV-9：使用量は段階の上限を超えない").toBeLessThanOrEqual(e.cap as number);
         break;
       }

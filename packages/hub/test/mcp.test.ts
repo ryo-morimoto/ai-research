@@ -45,7 +45,7 @@ describe("MCP（道具の面）", () => {
 
   it("code mode：実行環境（Worker Loader）から research.* を呼べる（Known Unknown の確認）", async () => {
     const r = await code(`async () => {
-      const b = await research.start({ question: "取得先の制限", queries: ["limits"] });
+      const b = await research.start({ mode: "survey", question: "取得先の制限", queries: ["limits"] });
       const p = b.passages.find((x) => x.text.includes("3秒に1回"));
       const v = await research.verify(b.runId, [{ text: "arXiv は3秒に1回", cite: [{ passageId: p.passageId, quote: "3秒に1回、同時接続1本まで" }] }]);
       return { passages: b.passages.length, status: v.statuses[0].status, hits: (await ledger.search("同時接続")).length };

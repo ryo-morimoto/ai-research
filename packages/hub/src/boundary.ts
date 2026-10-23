@@ -12,11 +12,11 @@ const strList = z.array(z.string()).max(8).optional();
 
 export const StartInput = z.object({
   question: str,
+  mode: z.enum(["lookup", "survey"]),
   scope: z.string().optional(),
   exclusions: z.array(z.string()).max(16).optional(),
   queries: strList,
   urls: z.array(z.string().url()).max(8).optional(),
-  depth: z.enum(["first", "standard"]).optional(),
 });
 export const SteerInput = z.object({ question: str, queries: strList, urls: z.array(z.string().url()).max(8).optional() });
 export const ClaimsInput = z

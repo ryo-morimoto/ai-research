@@ -49,7 +49,7 @@ describe("経路の判断（フックの受け口、U-03・Q-07）", () => {
 
   it("ai-research で取れなかった URL（blocked など）は WebFetch に回せる。方針で禁じた取得先は回さない（E-02）", async () => {
     const id = `run_route_${crypto.randomUUID().slice(0, 6)}`;
-    const b = await run(id).start(id, { question: "取れない出典", queries: [], urls: ["https://blocked.example.com/page", "https://www.youtube.com/watch?v=x"] });
+    const b = await run(id).start(id, { mode: "survey", question: "取れない出典", queries: [], urls: ["https://blocked.example.com/page", "https://www.youtube.com/watch?v=x"] });
     expect(b.cutoffs.map((c) => c.why).sort()).toEqual(["blocked", "policy"]);
     await sleep(50); // waitUntil で書かれるのを待つ
     await prompt("s5", "調べて");
