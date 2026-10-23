@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import type { VerifiedExcerpt, Volatility, Fingerprint, SourceKind } from "@ai-research/core";
+import { normalize, rankRelevant, searchTerms, type VerifiedExcerpt, type Volatility, type Fingerprint, type SourceKind } from "@ai-research/core";
+import { POLICY } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 
 /**
@@ -182,53 +183,71 @@ export class LedgerDO extends DurableObject<Env> {
   }
 
   /**
-   * 検索（INV-3、INV-4）。snapshotSeq より後のレコードと、snapshotSeq までに墓標が付いたものは返さない。
+   * 検索（INV-3、INV-4、設計 v1.3 §8.1.4）。
+   * snapshotSeq より後のレコードと、snapshotSeq までに墓標が付いたものは返さない。
+   * 候補は全文検索（trigram）で語に当たったもの。返すのは問いとの関連の下限を超えたものだけ（件数は limit まで）。
+   * query は問いと検索語（文字列1つでもよい）。
    */
-  search(text: string, opts: { snapshotSeq: number; limit: number }): LedgerRecord[] {
-    const q = text.trim();
+  search(query: string | string[], opts: { snapshotSeq: number; limit: number; minRatio?: number }): LedgerRecord[] {
+    const texts = (Array.isArray(query) ? query : [query]).map((t) => t.trim()).filter(Boolean);
+    if (texts.length === 0) return [];
+    const L = POLICY.ledger;
     let rows: Row[] = [];
-    if (q.length === 0) return [];
-    if (this.fts && Array.from(q).length >= 3) {
-      const terms = q
-        .split(/\s+/)
-        .filter((t) => Array.from(t).length >= 3)
-        .map((t) => `"${t.replace(/"/g, '""')}"`);
-      if (terms.length > 0) {
-        try {
-          rows = this.sql
-            .exec<Row>(
-              `SELECT r.* FROM records_fts f JOIN records r ON r.seq = f.rowid
-               WHERE records_fts MATCH ? AND r.seq <= ? ORDER BY bm25(records_fts) LIMIT ?`,
-              terms.join(" OR "),
-              opts.snapshotSeq,
-              opts.limit * 4,
-            )
-            .toArray();
-        } catch {
-          rows = [];
-        }
+    const ftsTerms = searchTerms(texts);
+    if (this.fts && ftsTerms.length > 0) {
+      try {
+        rows = this.sql
+          .exec<Row>(
+            `SELECT r.* FROM records_fts f JOIN records r ON r.seq = f.rowid
+             WHERE records_fts MATCH ? AND r.seq <= ? ORDER BY bm25(records_fts) LIMIT ?`,
+            ftsTerms.map((t) => `"${t.replace(/"/g, '""')}"`).join(" OR "),
+            opts.snapshotSeq,
+            L.ftsCandidates,
+          )
+          .toArray();
+      } catch {
+        rows = [];
       }
     }
-    if (rows.length === 0) {
-      const likes = q.split(/\s+/).filter((t) => t.length > 0).slice(0, 8);
-      const where = likes.map(() => `(excerpt LIKE ? OR coalesce(title,'') LIKE ? OR url LIKE ?)`).join(" OR ");
-      const params = likes.flatMap((t) => [`%${t}%`, `%${t}%`, `%${t}%`]);
-      rows = this.sql
-        .exec<Row>(`SELECT * FROM records WHERE seq <= ? AND (${where}) ORDER BY seq DESC LIMIT ?`, opts.snapshotSeq, ...params, opts.limit * 4)
-        .toArray();
+    if (!this.fts || ftsTerms.length === 0) {
+      // 全文検索がないとき、または語がどれも短いとき（2文字以下）だけ LIKE を使う。
+      // Durable Object の SQLite は LIKE の型を 50 バイトまでしか受け付けない（%…% を含む。2026-10-24 に試験で確認）
+      const enc = new TextEncoder();
+      const fit = (t: string) => {
+        let out = "";
+        for (const ch of t) {
+          if (enc.encode(`%${out}${ch}%`).length > L.likePatternMaxBytes) break;
+          out += ch;
+        }
+        return out;
+      };
+      const likes = texts
+        .flatMap((t) => t.split(/\s+/))
+        .map(fit)
+        .filter((t) => t.length > 0)
+        .slice(0, L.likeTerms);
+      if (likes.length > 0) {
+        const where = likes.map(() => `(excerpt LIKE ? OR coalesce(title,'') LIKE ?)`).join(" OR ");
+        const params = likes.flatMap((t) => [`%${t}%`, `%${t}%`]);
+        rows = this.sql
+          .exec<Row>(`SELECT * FROM records WHERE seq <= ? AND (${where}) ORDER BY seq DESC LIMIT ?`, opts.snapshotSeq, ...params, L.ftsCandidates)
+          .toArray();
+      }
     }
-    const out: LedgerRecord[] = [];
+    // 墓標と、同じ抜き書きの重複（同じ文が別の URL にあるものを含む）を除く。新しいものを残す
+    const live: LedgerRecord[] = [];
     const seen = new Set<string>();
-    for (const r of rows) {
+    for (const r of [...rows].sort((a, b) => b.seq - a.seq)) {
       if (r.seq > opts.snapshotSeq) continue;
       if (this.isTombstoned(r.record_id, r.url, opts.snapshotSeq, r.seq)) continue;
-      const key = `${r.url}\u{0}${r.excerpt}`;
+      const key = normalize(r.excerpt);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(toRecord(r));
-      if (out.length >= opts.limit) break;
+      live.push(toRecord(r));
     }
-    return out;
+    const ranked = rankRelevant(live, (r) => `${r.title ?? ""} ${r.excerpt}`, texts, { limit: opts.limit, minRatio: opts.minRatio ?? L.minRatio });
+    // 語の点数が付かない短い問い（例：2文字の語だけ）は、文字どおりに当たったものを返す
+    return ranked.length > 0 ? ranked.map((x) => x.item) : live.slice(0, opts.limit);
   }
 
   get(recordId: string): LedgerRecord | null {

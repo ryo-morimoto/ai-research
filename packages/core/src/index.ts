@@ -11,7 +11,19 @@ export {
   type MatchResult,
   type MatchOptions,
 } from "./verify.ts";
-export { splitParagraphs, terms, scoreParagraphs, selectPassages, clip, type Paragraph, type Selected, type SelectLimits } from "./select.ts";
+export {
+  splitParagraphs,
+  terms,
+  scoreParagraphs,
+  selectPassages,
+  clip,
+  searchTerms,
+  rankRelevant,
+  type Paragraph,
+  type Selected,
+  type SelectLimits,
+  type RankOptions,
+} from "./select.ts";
 export { estimateTokens, estimateJsonTokens, DEFAULT_TOKEN_FACTORS, type TokenFactors } from "./tokens.ts";
 export { classifyVolatility, maxVolatility, baseVolatility, DEFAULT_VOLATILITY_RULES, type VolatilityRule } from "./volatility.ts";
 export { admit, advance, capFor, DEFAULT_CAPS, type Phase, type BudgetState, type Admission } from "./budget.ts";

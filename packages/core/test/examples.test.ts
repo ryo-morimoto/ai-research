@@ -12,6 +12,8 @@ import {
   textHash,
   admit,
   advance,
+  searchTerms,
+  rankRelevant,
 } from "../src/index.ts";
 
 const source = { kind: "web" as const, url: "https://example.com/a", locator: "https://example.com/a" };
@@ -164,5 +166,29 @@ describe("上書きの防止（Q-06）：数字・否定を書き換えた引用
   it("記号・空白・桁区切りの違いは表記差として通す", () => {
     expect(matchQuote("arXiv の API は 3 秒に 1 回 同時接続 1 本までとする", src)).toMatchObject({ ok: true, kind: "context" });
     expect(matchQuote("上限は1000件", "上限は1,000件。")).toMatchObject({ ok: true });
+  });
+});
+
+describe("searchTerms：全文検索に渡す語（長い文をそのまま型にしない）", () => {
+  it("ASCII は3文字以上の語、日本語は3文字ずつ、上限つき", () => {
+    expect(searchTerms(["SQLite の上限は何 GB"])).toEqual(["sqlite", "の上限", "上限は", "限は何"]);
+    expect(searchTerms(["あいうえおかきくけこ".repeat(20)], 32).length).toBe(10);
+    expect(searchTerms(["a b 1回"])).toEqual([]);
+  });
+});
+
+describe("rankRelevant：関連の下限と件数の上限", () => {
+  const items = [
+    "Each SQLite-backed Durable Object has a storage limit of 10 GB",
+    "Accounts on the Workers Free plan have a daily request limit",
+    "TypeScript 5.9 adds import defer",
+  ];
+  it("最上位との比が下限に満たないもの・語に当たらないものは返さない", () => {
+    const r = rankRelevant(items, (x) => x, ["Durable Object SQLite storage limit GB"], { limit: 5, minRatio: 0.5 });
+    expect(r.map((x) => x.item)).toEqual([items[0]]);
+  });
+  it("件数の上限を守る", () => {
+    const r = rankRelevant(items, (x) => x, ["limit"], { limit: 1, minRatio: 0 });
+    expect(r.length).toBe(1);
   });
 });

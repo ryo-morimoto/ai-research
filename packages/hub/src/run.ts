@@ -256,8 +256,7 @@ export class RunDO extends DurableObject<Env> {
     // 台帳から候補を選び、照らし直す（W-03、Q-02）
     this.spawn(v, "台帳の検索", async () => {
       const ledger = ledgerStub(this.env);
-      const text = [opts.question, ...opts.queries].join(" ");
-      const records = await ledger.search(text, { snapshotSeq: m.manifest.ledgerSnapshotSeq, limit: POLICY.search.maxLedgerCandidates });
+      const records = await ledger.search([opts.question, ...opts.queries], { snapshotSeq: m.manifest.ledgerSnapshotSeq, limit: POLICY.ledger.show });
       if (!this.current(v)) return;
       for (const record of records) {
         if ([...this.hits.values()].some((h) => h.v === v && h.record.recordId === record.recordId)) continue;
@@ -389,6 +388,7 @@ export class RunDO extends DurableObject<Env> {
           excerpt: h.record.excerpt,
           source: { kind: h.record.kind, url: h.record.url, locator: h.record.locator, ...(h.record.title ? { title: h.record.title } : {}) },
           status: h.status,
+          verifiedAt: h.record.verifiedAt,
         };
         if (h.reason) out.reason = h.reason;
         return out;

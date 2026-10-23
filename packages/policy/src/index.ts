@@ -61,7 +61,9 @@ export const POLICY = {
     "platform.claude.com",
     "code.claude.com",
   ],
-  search: { resultsPerQuery: 5, maxSourcesPerRun: 8, maxLedgerCandidates: 10 },
+  search: { resultsPerQuery: 5, maxSourcesPerRun: 8 },
+  /** 台帳の候補（設計 v1.3 §8.1.4）。関連の下限（最上位との比）を超えたものを show 件まで。照らし直すのはその後のものだけ */
+  ledger: { show: 5, minRatio: 0.5, ftsCandidates: 200, likeTerms: 8, likePatternMaxBytes: 50 },
   userAgent: "ai-research/0.1 (+https://github.com/ryo-morimoto/ai-research)",
   /** 経路の判断（制約 v0.6 U-03・Q-07、設計 v1.2 §7.6）。フックの受け口が使う */
   routing: {

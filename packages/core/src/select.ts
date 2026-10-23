@@ -126,3 +126,44 @@ export function selectPassages(
   }
   return out;
 }
+
+/**
+ * 全文検索（FTS5 の trigram）に渡す語（設計 v1.3 §8.1.4）。
+ * ASCII は3文字以上の語、それ以外は3文字ずつ。長い文をそのまま型にしない。数に上限を付ける。
+ */
+export function searchTerms(texts: string[], max = 32): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (t: string) => {
+    if (out.length < max && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  };
+  for (const text of texts) {
+    const n = normalize(text).toLowerCase();
+    for (const w of n.match(/[a-z0-9_]+(?:[.\-][a-z0-9_]+)*/g) ?? []) if (w.length >= 3) push(w);
+    for (const run of n.replace(/[\x00-\x7f]+/g, " ").split(/\s+/)) {
+      const chars = Array.from(run).filter((c) => !/[\p{P}\p{S}]/u.test(c));
+      for (let i = 0; i + 2 < chars.length; i++) push(chars.slice(i, i + 3).join(""));
+    }
+  }
+  return out;
+}
+
+export type RankOptions = { limit: number; minRatio: number };
+
+/**
+ * 問いとの関連で並べ、関連の下限（最上位の点数との比）を超えたものを件数の上限まで返す（設計 v1.3 §8.1.3・§8.1.4）。
+ * 台帳の候補と段落の候補の両方で使う（判断を1か所に置く）。
+ */
+export function rankRelevant<T>(items: T[], textOf: (item: T) => string, query: string[], opts: RankOptions): { item: T; score: number }[] {
+  const paras = items.map((item, index) => ({ sourceId: "r", index, text: textOf(item) }));
+  const scores = scoreParagraphs(paras, query);
+  const ranked = paras
+    .map((p) => ({ item: items[p.index] as T, score: scores.get(p) ?? 0 }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const top = ranked[0]?.score ?? 0;
+  return ranked.filter((x) => x.score >= top * opts.minRatio).slice(0, opts.limit);
+}

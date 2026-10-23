@@ -71,6 +71,29 @@ describe("台帳（LedgerDO）", () => {
     expect((await l.search("機械の合計", { snapshotSeq: await l.currentSeq(), limit: 5 })).length).toBe(0);
   });
 
+  it("長い日本語の問いでも失敗しない（LIKE の型に長い文をそのまま入れない）", async () => {
+    const l = ledger();
+    await l.appendVerified(excerptFrom(TEXT, "3秒に1回、同時接続1本まで"), "normal", "r1");
+    const q = "claude.ai の Customize > Plugins で、自分の GitHub リポジトリにあるプラグイン（マーケットプレイス）を個人アカウントに追加できるか。プラグインの .mcp.json にリモート MCP（OAuth）を書けるか".repeat(3);
+    await expect(l.search([q, "arXiv の API の制限"], { snapshotSeq: await l.currentSeq(), limit: 5 })).resolves.toBeDefined();
+  });
+
+  it("問いとの関連の下限を超えたものだけを、件数の上限まで返す。同じ抜き書きは1件にまとめる（設計 v1.3 §8.1.4）", async () => {
+    const l = ledger();
+    const add = (text: string, quote: string, url: string, title?: string) =>
+      l.appendVerified(excerptFrom(text, quote, { url, locator: url, ...(title ? { title } : {}) }), "normal", "r");
+    await add("Each SQLite-backed Durable Object has a storage limit of 10 GB on a Workers Paid plan.", "Each SQLite-backed Durable Object has a storage limit of 10 GB on a Workers Paid plan.", "https://a.example/limits", "Limits");
+    await add("Each SQLite-backed Durable Object has a storage limit of 10 GB on a Workers Paid plan.", "Each SQLite-backed Durable Object has a storage limit of 10 GB on a Workers Paid plan.", "https://github.example/faq.mdx");
+    await add("Accounts on the Workers Free plan have a daily request limit of 100,000 requests.", "Accounts on the Workers Free plan have a daily request limit of 100,000 requests.", "https://a.example/workers", "Limits");
+    await add("TypeScript 5.9 adds import defer and a new tsc --init.", "TypeScript 5.9 adds import defer and a new tsc --init.", "https://b.example/ts", "Announcing TypeScript 5.9");
+    await add("A new stable release of Rust is produced every six weeks.", "A new stable release of Rust is produced every six weeks.", "https://c.example/rust", "Rust");
+    const seq = await l.currentSeq();
+    const hits = await l.search(["Durable Object SQLite storage limit GB", "Durable Objects storage per object"], { snapshotSeq: seq, limit: 5 });
+    expect(hits.map((h) => h.excerpt)).toEqual(["Each SQLite-backed Durable Object has a storage limit of 10 GB on a Workers Paid plan."]);
+    const rust = await l.search(["Rust の最新の安定版", "Rust latest stable release"], { snapshotSeq: seq, limit: 5 });
+    expect(rust.map((h) => h.url)).toEqual(["https://c.example/rust"]);
+  });
+
   it("制約：抜き書きは300字まで（SQL の CHECK でも拒む）", async () => {
     const l = ledger();
     await expect(

@@ -18,6 +18,8 @@ export type LedgerHit = {
   source: SourceRef;
   status: "確認済" | "照合中" | "未確認";
   reason?: string;
+  /** 台帳に入れたとき（原文と照らした日時）。変わりやすい値の新しさを判断するため（Q-01） */
+  verifiedAt: string;
 };
 
 export type CutoffReason = "timeout" | "blocked" | "robots" | "policy" | "budget" | "error" | "unsupported" | "not_configured";
