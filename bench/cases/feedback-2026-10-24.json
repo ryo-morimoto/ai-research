@@ -1,0 +1,8 @@
+{
+  "description": "2026-10-24 のチャットの試行で使った3つの依頼（どれも道具を指定しない、1つの事実を問う依頼）",
+  "cases": [
+    { "id": "do-storage", "kind": "single-fact", "prompt": "Cloudflare Durable Objects の SQLite ストレージは1つあたり何 GB まで？" },
+    { "id": "rust-stable", "kind": "single-fact", "prompt": "Rust の最新の安定版はいくつ？" },
+    { "id": "workers-cpu-url", "kind": "single-fact-url", "prompt": "https://developers.cloudflare.com/workers/platform/limits/ の Free プランの CPU 時間の上限は？" }
+  ]
+}

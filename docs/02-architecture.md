@@ -2,8 +2,9 @@
 
 - 名前：**ai-research**。ハブ、MCP サーバー、リポジトリの名前に使う
 
-- 版：v1.2（2026-10-24）。v0.2 までの設計を置き換える（作り直し）
-- 対象：「調査高速化：やりたいことと制約の宣言」v0.6
+- 版：v1.3（2026-10-24）。v0.2 までの設計を置き換える（作り直し）
+- 対象：「調査高速化：やりたいことと制約の宣言」v0.7
+- v1.2 からの変更：制約 v0.7 の S-06（流し込む量を関係するものに限る）・U-04（往復と形式を問いの重さに合わせる）・P-05（失敗を次の手が決まる形で返す）に合わせて、**依頼の種類・原文の塊・説明の置き場所・境界の失敗**をデータと構造で持つようにした（§3、§8.1、§10）。チャットでの試行3件のふりかえりを、症状ごとの手当てではなく、根本の原因ごとに直した。判断の拠り所は pstack（cursor/plugins）の原則で、どの原則がどの決定を変えたかを §8.1.6 に書いた
 - v1.1 からの変更：制約 v0.6 の U-03（調べものがこのシステムの経路を通る）と Q-07（通らなかった結果を示す）に合わせて、**経路に乗せる仕組み**を足した（§7.4〜7.8）。ai-memory（akitaonrails/ai-memory）の、面ごとの対応表と「指示に頼らずフックで確実にする」構造に倣った
 - 凡例：【確認済】一次資料で確かめた / 【推論】資料からの推論 / 【要計測】試作で測って決める
 - v1.0 からの変更：制約 v0.5 に合わせた。モデルの違いは揺らぎとして扱い、固定しない。Q-06 は照合器による保存の強制で満たすことにし、サブエージェントの案と引きずり試験を外した
@@ -37,6 +38,10 @@
 | D5 主張は段落に縛る | 主張は、ハブが返した段落を引用したときだけ確認済になる。引用のない主張は未確認 | Q-01, Q-06 |
 | D6 締め切りは道具の側で持つ | 取得と照らし直しの締め切りはハブの関数が守る。遅れたものは次の呼び出しで差分として返す | W-01, P-01, P-02, Q-04 |
 | D7 経路はできる面では強制し、できない面では常に読まれる場所で指示し、どちらも測る | 指示は道具を選ぶ前に読まれる場所（スキルの説明、アカウントの指示）に置く。道具の説明文だけに頼らない。フックがある面では、経路の外の道具をフックで止める | U-03, Q-07 |
+| D9 依頼の種類はデータで持つ | 「1つの事実を引く（lookup）」と「調べる（survey）」を依頼の型として持ち、取得の範囲・返す量・続きの有無・締め切りを種類から決める。条件分岐を増やさない | S-06, U-04, W-04 |
+| D10 原文は型つきの塊で持つ | 文・箇条・表の行・見出し・コード・メタデータを区別する。段落の候補は文として読める塊だけ。表の行には見出しの行を文脈として添える | S-06, Q-01 |
+| D11 説明は内容ごとに1か所 | いつ使うか＝スキルの説明文、手順と API と結果の書き方＝code の道具の説明文、経路外の書き方＝フックの返す文。サーバーの説明文とスキルの本文は、そこを指すだけ。大きさは試験で上限を守る | S-06 |
+| D12 失敗は境界で型にする | 実行環境に渡す関数の境界で、内部の失敗を種別（再試行してよいか、次の手）に直して返す。内部では型を信じ、確かめ直さない | P-05 |
 | D8 経路の判断もハブに置く | フックは受け渡しだけをし、止める・通すの判断と例外はハブの方針として持つ。機械には判断の版を置かない。ハブに届かなければ止めない側に倒れる | U-03, Q-05, U-01 |
 
 ---
@@ -122,66 +127,42 @@ flowchart LR
 ## 3. ハブの API（code mode で会話の Claude に見せる型）
 
 ```ts
-// 標準手順（ふつうはこれだけ使う）
+// 依頼の種類（D9）。種類から、取得の範囲・返す量・続きの有無・締め切りが決まる
+type Mode =
+  | "lookup"   // 1つの事実を引く。台帳を先に見る。urls があれば検索しない。返す段落は少なく、続きは集めない
+  | "survey";  // 調べる（比較・調査）。最初の結果＋続き（合計4分まで）
+
 research.start(q: {
   question: string;          // 解釈した問い。会話を参照しなくても意味が決まる文
-  scope?: string;            // 対象・期間・地域など
-  exclusions?: string[];
-  queries: string[];         // 検索語（3〜5個）
-  depth?: "first" | "standard";   // standard は最初の結果＋続き（合計4分まで）
-  urls?: string[];           // 利用者が示した URL（検索せずに直接読む）
-}): Promise<Bundle>;
+  mode: Mode;
+  queries?: string[];        // 検索語。lookup で urls があれば省く
+  urls?: string[];           // 利用者が示した URL
+  scope?: string; exclusions?: string[];
+}): Promise<Bundle | HubError>;
 
-research.next(runId: string, opts?: { waitMs?: number }): Promise<Bundle>;   // 差分だけ
-// cite の quote は、引いた段落からの原文どおりの引用。照合は quote と段落の原文で行う（主張の文は使わない）
-research.verify(runId: string, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<VerifyResult>;
-research.steer(runId: string, q: { question: string; queries: string[]; urls?: string[] }): Promise<Bundle>;
-research.deepen(runId: string): Promise<Bundle>;   // 利用者が求めたときだけ（W-04）
+research.next(runId, opts?: { waitMs?: number }): Promise<Bundle | HubError>;   // 差分だけ（survey）
+research.verify(runId, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<VerifyResult | HubError>;
+research.steer(runId, q: { question: string; queries?: string[]; urls?: string[] }): Promise<Bundle | HubError>;
+research.deepen(runId): Promise<Bundle | HubError>;   // 利用者が求めたときだけ（W-04）
+research.close(runId): Promise<{ closed: true } | HubError>;   // 答えが出たら止める（survey）。lookup は最初の束で終わる
 
-// 台帳（実行環境からは検索だけ。取り消しと書き出しは MCP の道具 ledger_forget / ledger_export）
 ledger.search(text: string): Promise<LedgerHit[]>;
 
-// 個別の道具（標準手順で足りないときだけ）。実装 v0.1 では未実装（M2）
-web.search(query: string): Promise<SearchHit[]>;
-web.fetch(url: string, opts?: { selectFor?: string }): Promise<Passage[]>;
-github.file(repo: string, path: string, ref?: string): Promise<Passage[]>;
-github.grep(repo: string, pattern: string, ref?: string): Promise<Passage[]>;
-arxiv.paper(id: string, opts?: { selectFor?: string }): Promise<Passage[]>;
-
+type Passage = { passageId: string; text: string; context?: string; source: Source };   // context は見出し・表の見出し行（照合の対象外）
+type LedgerHit = { passageId: string; excerpt: string; source: Source; status: "確認済" | "照合中" | "未確認"; verifiedAt: string };
 type Bundle = {
-  runId: string;
+  runId: string; mode: Mode;
   question: { version: number; text: string };
-  ledgerHits: { passageId: string; excerpt: string; source: Source; status: "確認済" | "照合中" | "未確認" }[];
-  passages: { passageId: string; text: string; source: Source }[];   // 1件の長さと件数に上限
-  cutoffs: { what: string; why: string }[];   // 打ち切り・取得不能
-  budget: { usedTokens: number; remainingTokens: number };
-  done: boolean;
+  ledgerHits: LedgerHit[];   // 問いとの関連の下限を超えたものだけ。lookup は3件まで
+  passages: Passage[];       // lookup は5件まで
+  cutoffs: Cutoff[];         // 答えに影響したものは1件ずつ、それ以外は件数（Q-04）
+  done: boolean; notices: Notice[];
 };
+type HubError = { error: { code: "busy" | "run_not_found" | "bad_input" | "internal"; retryable: boolean; message: string; next: string; runId?: string } };
 ```
 
-- 束の大きさには上限を付ける（例：1回あたり6千トークン）【要計測】。Cloudflare の code mode も、大きな応答を約6千トークンで切る。【確認済】[1]
-- 個別の道具が返すのも全文ではなく、`selectFor` に合う段落だけ。全文はハブの中に留まる。
-- 道具の説明文には次を書く。説明文はハブから配られるので、どの機械・どのアプリでも同じになる。
-  - 標準の使い方（下のコード例）
-  - 解釈した問いの書き方
-  - 結果の見せ方（解釈した問い、主張ごとの状態、打ち切り、利用者への問い）
-  - 常設の方針
-
-標準の使い方（会話の Claude が書くコード）：
-
-```ts
-// 1ターン目：問いと検索語を決めて始める
-return await research.start({
-  question: "…", queries: ["…", "…", "…"], depth: "standard",
-});
-
-// 2ターン目：束の段落だけを根拠に主張を書き、照合する。届いていた差分も受け取る
-const statuses = await research.verify(runId, [
-  { text: "…", cite: [{ passageId: "p3", quote: "…原文どおりの一節…" }, { passageId: "p7", quote: "…" }] },
-]);
-const more = await research.next(runId, { waitMs: 0 });
-return { statuses, more };
-```
+- 台帳の候補で「確認済」のものは、その回に照らし直して原文と合っている。lookup で台帳の候補が問いに答えていれば、verify を呼ばずにそのまま答えてよい（U-04）。
+- 実行環境の外への通信、台帳への書き込み、束の大きさの上限は v1.2 と同じ。
 
 ---
 
@@ -420,6 +401,71 @@ PreToolUse の判断の規則（上から順に）：
 
 ---
 
+### 8.1 会話に流し込む量と往復（S-06、U-04）
+
+#### 8.1.1 根本の原因
+
+チャットでの試行3件（1つの事実を問う依頼）で、会話に入った量の大半が問いに関係しなかった（計測：推定 3,459〜5,820 トークン、精度 0.05〜0.18、2回とも同じ傾向。bench/run_cases.py）。症状は10を超えたが、原因は次の5つにまとまる。
+
+| 原因（最初に誤った判断をした箇所） | 出ていた症状 |
+|---|---|
+| 依頼の種類を持っていない。1つの事実も調査も同じ流れ・同じ上限・同じ続きで動く | 最低3往復。URL を示しても検索が走る。答えの後も4分集め続ける。続きで段落がまた届く |
+| 照らし直しのために取り直した文書を、段落の候補に足していた（`revalidate` → `addDoc`） | 無関係な台帳の候補の出典（他のリポジトリの README など）の段落が束を占めた |
+| 台帳の検索が、問いと検索語のすべての語の OR で、関連の下限がない。日本語の長い文をそのまま LIKE の型に入れていた | 無関係な台帳の候補が10件。長い問いで「LIKE or GLOB pattern too complex」 |
+| 原文を段落という1種類の塊でしか持っていない | フロントマター、構造化データ、リンク集、見出しだけの断片が段落になった。長い箇条が1つの段落にまとまり、600字で切れた。表の行に見出しがない |
+| 説明を、失敗するたびに別の場所に書き足していた | 同じ手順が、アカウントの指示・スキルの本文・道具の説明文の3か所にあった。サーバーの説明文と道具の説明文の中身も同じだった |
+
+#### 8.1.2 依頼の種類（D9）
+
+| | lookup（1つの事実） | survey（調べる） |
+|---|---|---|
+| 台帳 | 先に見る。関連の下限を超えたもの3件まで | 同じ下限で5件まで |
+| 取得の範囲 | urls があればそれだけ（検索しない）。なければ検索語で検索 | 検索語で検索、urls も読む |
+| 返す段落 | 5件まで | 12件まで（v1.2 と同じ） |
+| 最初の束の締め切り | 15秒（取得の範囲が狭いので） | 25秒（v1.2 と同じ） |
+| 続き | 集めない。最初の束で終わる | 4分まで。`close` で止める |
+| 会話の側の呼び出し | start →（必要なら）verify。台帳の候補が答えなら start だけ | start → verify＋next → … |
+
+種類はモデルが選ぶ。選び方は code の道具の説明文に1行で書く（1つの事実・1つの URL なら lookup）。
+
+#### 8.1.3 原文の塊（D10）
+
+- 取得の出口で、原文を型つきの塊にする。HTML は要素（`p`、`li`、`tr`、`h1`〜`h6`、`pre`）から、Markdown（GitHub の raw）は行の形から作る。
+- 段落の候補にするのは、文・箇条の1項目・表の1行・メタデータ（公開日など、ページの属性の値を原文どおりに書いた行）だけ。見出し、コード、フロントマター、構造化データ（JSON-LD）は候補にしない。
+- 見出しと表の見出し行は `context` として添える。照合の対象は `text` だけ（原文に連続して現れる文字列だけを照合するため）。
+- 段落の候補は、問いの語に当たったうえで、最上位の点数との比が下限以上のものに限る。
+
+#### 8.1.4 台帳の候補
+
+- 候補を探す語は、段落選びと同じ語の分け方（core の `terms`）を使い、数に上限を付ける。長い文をそのまま型にしない。
+- 候補ごとに問いとの関連を点数にし、下限を超えたものを件数の上限まで取る。照らし直すのはその後のものだけ（取得の回数も減る）。
+- 照らし直しで取り直した文書は、その候補の照合にだけ使う。段落の候補には足さない。
+
+#### 8.1.5 説明の置き場所（D11）
+
+| 内容 | 置き場所 | 他の場所 |
+|---|---|---|
+| いつ使うか | スキルの説明文（常に見える） | アカウントの指示に1行（チャットとハブに届かないとき用。利用者が持つ） |
+| 手順・API・結果の書き方 | code の道具の説明文 | スキルの本文は「code の道具の説明文に従う」だけ。サーバーの説明文は2行 |
+| 経路外の書き方 | フックが返す文（その場で必要なときだけ届く） | code の道具の説明文に1行 |
+
+- 結果の書き方は短くする。確認状態は出典の後ろに「（確認済、出典、確かめた日）」の形で付ける。解釈した問いは会話から補ったときだけ（Q-06）。打ち切りは答えに影響したものだけ（Q-04）。
+- 説明の大きさは試験で上限を守る（code の道具の説明文、サーバーの説明文、スキルの本文）。書き足すたびに大きくなる流れを構造で止める。
+
+#### 8.1.6 拠り所にした原則（pstack）
+
+| 原則 | 変えた決定 |
+|---|---|
+| Fix Root Causes / Attack the Premise | 10を超える症状を、最初に誤った判断をした5か所に戻して直す（§8.1.1）。締め切りを短くするだけ、件数を減らすだけ、といった症状の手当てをしない |
+| Redesign from First Principles | 1つの事実を引く依頼を、最初から依頼の型にあったものとして API と RunDO を作り直す（`depth` をやめて `mode`） |
+| Model the Domain / Type System Discipline | 依頼の種類と原文の塊を型で持ち、条件分岐を散らさない |
+| Subtract Before You Add / Laziness Protocol | 先に、照らし直しの文書を段落に足す処理と、重なった説明を消す。新しい道具（web.fetch など）は足さず、lookup の型で URL を読む |
+| Encode Lessons in Structure | 説明の重なりは、説明の大きさの試験で止める。経路の強制はフックで行い、説明文を書き足さない |
+| Boundary Discipline | 失敗は実行環境に渡す関数の境界で型にする（§10） |
+| Make Operations Idempotent | `busy` で失敗した `start` は、同じ呼び出しをもう一度すればよい形にする |
+| Explain the Number / Prove It Works | 計測の道具（bench/run_cases.py）で、同じ依頼セットを変更の前後で2回ずつ測る。ストレージの時間切れは、何が律速かを測るまで締め切りの調整で隠さない（§12） |
+| Sequence Work into Verifiable Units | 引き算 → 境界 → 台帳 → 塊 → 種類 → メタデータの順に、1つずつ試験を通してから次に進む |
+
 ## 9. 守るものの設計
 
 | 制約 | 設計 |
@@ -449,6 +495,7 @@ PreToolUse の判断の規則（上から順に）：
 | 取得先がハブの送信元を拒む | 取得不能として打ち切る | cutoffs |
 | 予算の上限に近い | 束を返さずに止める | 止めた理由 |
 | 会話の Claude が書いたコードが失敗する | エラーと正しい呼び方の例を返す。標準手順は1〜2行で書けるようにして、失敗の余地を減らす | — |
+| ハブの内部の失敗（Durable Object の過負荷・ストレージの時間切れ・初期化） | 実行環境に渡す関数の境界で `HubError` に直す。`busy` は `retryable: true` で、`next` に「数秒おいて同じ呼び出しをもう一度」と書く。続きを受け取れる `runId` があれば添える | 会話の Claude が、再試行するか経路外に出るかを決められる（P-05） |
 
 ハブに届かないときの振る舞いは、ハブの道具の説明文では伝えられない（届かないので）。アカウントの指示（Instructions for Claude）の1行と、スキル `ai-research-first` で伝える（§7.6）。フックは、ハブに届かなければ止めない（§7.6）。
 
@@ -508,6 +555,7 @@ PreToolUse の判断の規則（上から順に）：
 | チャットで、スキルとアカウントの指示だけで経路率がどこまで上がるか | 不明 | 依頼セットで測る（§7.7） |
 | http のフックの受け口に、ハブの公開 URL へ送ってよいか（送信の内容） | 送るのは道具の入力と会話の ID。依頼文はハブで判定して捨てる | 実装で送信内容を記録して確かめる |
 | `mcp_tool` のフック（接続済みの MCP の道具を呼ぶ）で、OAuth を使い回せるか | 二次資料ではできるとされる。claude.ai のコネクタの名前でフックから呼べるか、失敗したときに止めないかは未確認 | 使えて失敗時に止めないなら、http の代わりに使う（受け口を OAuth の内側に置ける） |
+| ストレージの時間切れ（2026-10-24、3つの依頼を同時に処理したとき）の律速 | RunDO・LedgerDO・HostLimiterDO の呼び出しが、CPU をほぼ使わずに 26〜30 秒待った。`RunDO.start` は壁時計時間 30,021 ms で打ち切られた。何が律速かは分かっていない | ストレージ操作の時間を記録する（遅いときだけ記録に残す）。律速が分かるまで締め切りの調整で隠さない |
 | 会話の Claude が持つ他の道具への注入（E-03） | 束の段落が会話に入るので、理論上は起こりうる | 指示を仕込んだページでの試験。副作用のある道具は常に許可にしない |
 
 ---
@@ -522,6 +570,7 @@ PreToolUse の判断の規則（上から順に）：
 | M3 外部への配慮 | HostLimiterDO、取得不能の扱い、台帳の道具、ハブに届かないときの1行の設定 | E-02、P-02、U-02、オフライン試験に通る |
 | M4 一貫性と費用 | 上書き試験、揺らぎの計測（モデル違いを含む）、R-01 の計数、`deepen` | 上書き試験で台帳に原文にない文が入らない。揺らぎの大きさが分かる。R-01 の上限で止まる |
 | M5 経路 | プラグイン（スキル、http のフック）、フックの受け口と判断の規則、経路率の計数、アカウントの指示の1行 | 強制できる面で、道具を指定しない依頼の経路率 100%（例外を除く）。ハブを止めた状態で、組み込みのウェブ検索に落ちて「経路外」と表示される。チャットの抜き取りで 90% 以上 |
+| M6 流し込む量 | §8.1 の5つの原因の修正（引き算、境界の失敗、台帳の候補、原文の塊、依頼の種類、メタデータ） | 依頼セット（bench/cases/feedback-2026-10-24.json）で、1つの事実の依頼が §2.5（制約 v0.7）の目標に入る。変更の前後を2回ずつ測る |
 
 ---
 
