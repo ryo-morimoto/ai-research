@@ -18,6 +18,8 @@ export type SelectLimits = {
   passagesPerBundle: number;
   passagesPerSource: number;
   maxTokens: number;
+  /** 最上位の点数との比の下限（設計 v1.3 §8.1.3）。0 なら下限なし */
+  minRatio?: number;
 };
 
 export function splitParagraphs(sourceId: string, text: string): Paragraph[] {
@@ -110,11 +112,13 @@ export function selectPassages(
     .map((p) => ({ p, s: scores.get(p) ?? 0 }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s || a.p.sourceId.localeCompare(b.p.sourceId) || a.p.index - b.p.index);
+  const floor = (ranked[0]?.s ?? 0) * (limits.minRatio ?? 0);
   const perSource = new Map<string, number>();
   const out: Selected[] = [];
   let total = 0;
   for (const { p, s } of ranked) {
     if (out.length >= limits.passagesPerBundle) break;
+    if (s < floor) break;
     const used = perSource.get(p.sourceId) ?? 0;
     if (used >= limits.passagesPerSource) continue;
     const text = clip(p.text, query, limits.passageMaxChars);

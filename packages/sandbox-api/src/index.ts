@@ -9,7 +9,8 @@ export type SourceKind = "web" | "github" | "arxiv";
 
 export type SourceRef = { kind: SourceKind; url: string; title?: string; locator: string };
 
-export type Passage = { passageId: string; text: string; source: SourceRef };
+/** context は見出し・表の見出し行（照合の対象外）。照合で引用するのは text だけ */
+export type Passage = { passageId: string; text: string; context?: string; source: SourceRef };
 
 export type LedgerHit = {
   passageId: string;

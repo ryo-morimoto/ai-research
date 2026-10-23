@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  candidateParagraphs,
   normalize,
   selectPassages,
-  splitParagraphs,
   verifyQuote,
   reverifyRecord,
   statusLabel,
@@ -51,7 +51,7 @@ import { timed } from "./obs.ts";
  */
 
 type SourceEntry = { sourceId: string; doc: Doc; v: number };
-type ParaEntry = { passageId: string; sourceId: string; text: string; v: number; index: number; delivered: boolean };
+type ParaEntry = { passageId: string; sourceId: string; text: string; context?: string; v: number; index: number; delivered: boolean };
 type HitEntry = {
   passageId: string;
   v: number;
@@ -219,9 +219,11 @@ export class RunDO extends DurableObject<Env> {
     if (!this.current(v)) return null;
     const sourceId = `s${++this.counters.source}`;
     this.sources.set(sourceId, { sourceId, doc, v });
-    for (const p of splitParagraphs(sourceId, doc.text)) {
+    for (const p of candidateParagraphs(sourceId, doc.blocks)) {
       const passageId = `p${++this.counters.passage}`;
-      this.paras.set(passageId, { passageId, sourceId, text: p.text, v, index: p.index, delivered: false });
+      const e: ParaEntry = { passageId, sourceId, text: p.text, v, index: p.index, delivered: false };
+      if (p.context) e.context = p.context;
+      this.paras.set(passageId, e);
       this.meta!.passageMeta[passageId] = { sourceId, url: doc.source.url, locator: doc.source.locator, v, index: p.index };
     }
     this.notify();
@@ -368,7 +370,9 @@ export class RunDO extends DurableObject<Env> {
   private toPassage(p: ParaEntry): Passage {
     const s = this.sources.get(p.sourceId);
     const src: Source = s?.doc.source ?? { kind: "web", url: this.meta!.passageMeta[p.passageId]?.url ?? "", locator: "" };
-    return { passageId: p.passageId, text: p.text, source: { ...src } };
+    const out: Passage = { passageId: p.passageId, text: p.text, source: { ...src } };
+    if (p.context) out.context = p.context;
+    return out;
   }
 
   private buildBundle(): Bundle {
@@ -437,6 +441,7 @@ export class RunDO extends DurableObject<Env> {
       passagesPerBundle: POLICY.limits.passagesPerBundle,
       passagesPerSource: POLICY.limits.passagesPerSource,
       maxTokens: Math.min(POLICY.limits.bundleMaxTokens, remaining),
+      minRatio: POLICY.passages.minRatio,
     });
     const byKey = new Map(candidates.map((c) => [`${c.sourceId}#${c.index}`, c as Paragraph & { passageId: string }]));
     let passages: Passage[] = selected.map((s) => {
@@ -683,7 +688,7 @@ export class RunDO extends DurableObject<Env> {
     // 取り直した原文で同じ位置の段落を使う。原文が変わっていれば照合に失敗する（安全側）
     const r = await this.gw().fetchDoc(pm!.url);
     if (r.ok && "doc" in r) {
-      const again = splitParagraphs(pm!.sourceId, r.doc.text).find((x) => x.index === pm!.index);
+      const again = candidateParagraphs(pm!.sourceId, r.doc.blocks).find((x) => x.index === pm!.index);
       if (again) return { ok: true, text: again.text, source: r.doc.source, fingerprint: r.doc.fingerprint };
     }
     return { ok: false, reason: "not_in_source" };

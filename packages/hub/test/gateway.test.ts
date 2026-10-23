@@ -6,13 +6,49 @@ import { upstreamLog, upstreamSet } from "./helpers.ts";
 
 describe("取得の出口（Gateway）", () => {
   it("HTML から本文を取り出す（Readability が workerd で動く）", () => {
-    const { title, text } = extractHtml(
+    const { title, blocks } = extractHtml(
       "<html><head><title>T</title></head><body><nav>menu</nav><article><h1>見出し</h1><p>一段落目の本文。</p><p>二段落目の本文。</p></article></body></html>",
       "https://x.example/",
     );
     expect(title).toBe("T");
-    expect(text).toContain("一段落目の本文。");
-    expect(text).toContain("二段落目の本文。");
+    expect(blocks.map((b) => [b.kind, b.text])).toEqual([
+      ["heading", "見出し"],
+      ["prose", "一段落目の本文。"],
+      ["prose", "二段落目の本文。"],
+    ]);
+  });
+
+  it("表は1行ずつの塊にし、見出し行と見出しを context にする。公開日は meta 要素・JSON-LD から原文どおりに（D10）", () => {
+    const html = `<html><head><title>Limits</title>
+      <meta property="article:published_time" content="2026-10-15T00:00:00+00:00">
+      <script type="application/ld+json">{"@context":"https://schema.org","dateModified":"2026-10-20"}</script></head>
+      <body><article><h2>Worker limits</h2><p>These limits apply to every Worker on every plan without exception.</p>
+      <table><thead><tr><th>Feature</th><th>Workers Free</th><th>Workers Paid</th></tr></thead>
+      <tbody><tr><td>CPU time</td><td>10 ms</td><td>5 min</td></tr><tr><td>Memory</td><td>128 MB</td><td>128 MB</td></tr></tbody></table>
+      <ul><li>Outer item<ul><li>Inner item</li></ul></li></ul></article></body></html>`;
+    const { blocks } = extractHtml(html, "https://x.example/limits");
+    expect(blocks.filter((b) => b.kind === "meta").map((b) => b.text)).toEqual(["article:published_time: 2026-10-15T00:00:00+00:00", "dateModified: 2026-10-20"]);
+    expect(blocks.filter((b) => b.kind === "row")).toEqual([
+      { kind: "row", text: "CPU time | 10 ms | 5 min", context: "Worker limits — Feature | Workers Free | Workers Paid" },
+      { kind: "row", text: "Memory | 128 MB | 128 MB", context: "Worker limits — Feature | Workers Free | Workers Paid" },
+    ]);
+    expect(blocks.filter((b) => b.kind === "item").map((b) => b.text)).toEqual(["Outer item", "Inner item"]);
+    expect(blocks.some((b) => b.text.includes("@context"))).toBe(false);
+  });
+
+  it("<meta http-equiv=refresh> の転送を1回だけ追う（/releases/latest/ のような URL）", async () => {
+    await upstreamSet({ url: "https://docs.example.com/latest/", contentType: "text/html", body: `<html><head><meta http-equiv="refresh" content="0; url=/limits"></head><body>Redirecting…</body></html>` });
+    const r = await new Gateway(env).fetchDoc("https://docs.example.com/latest/");
+    expect(r.ok && "doc" in r && r.doc.source.url).toBe("https://docs.example.com/limits");
+    if (r.ok && "doc" in r) expect(r.doc.text).toContain("3秒に1回");
+  });
+
+  it("どの段落の候補も、文書の全文（照合に使う）の部分文字列", async () => {
+    const r = await new Gateway(env).fetchDoc("https://github.com/acme/tool/blob/main/README.md");
+    if (!(r.ok && "doc" in r)) throw new Error("取れない");
+    const { candidateParagraphs, normalize } = await import("@ai-research/core");
+    const full = normalize(r.doc.text);
+    for (const p of candidateParagraphs("s", r.doc.blocks)) expect(full).toContain(p.text);
   });
 
   it("URL の種類を見分ける", () => {

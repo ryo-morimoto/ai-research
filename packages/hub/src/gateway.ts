@@ -1,10 +1,10 @@
-import { textHash, type Fingerprint, type Source } from "@ai-research/core";
+import { blocksFromMarkdown, blocksFromPlainText, docText, textHash, type Block, type Fingerprint, type Source } from "@ai-research/core";
 import { POLICY, isForbidden, isExcluded, isPreferred } from "@ai-research/policy";
 import type { Cutoff } from "@ai-research/sandbox-api";
 import type { Env } from "./env.ts";
 import { withLease, LeaseTimeout } from "./limiter.ts";
 import { parseRobots, isAllowed, type RobotsRules } from "./robots.ts";
-import { extractHtml } from "./extract.ts";
+import { extractHtml, metaRefreshTarget } from "./extract.ts";
 import { deadlines, timeScale } from "./time.ts";
 
 /**
@@ -13,7 +13,22 @@ import { deadlines, timeScale } from "./time.ts";
  * - 取得1件ごとの時間上限（P-02）。同じ実行の中で失敗した URL は再取得しない（INV-14）
  * - 要約を挟まない取得経路（S-03）：GitHub は raw、arXiv は HTML、Web は本文抽出
  */
-export type Doc = { source: Source; text: string; fingerprint: Fingerprint };
+/** 取得した原文。blocks が型つきの塊（設計 v1.3 D10）、text はその全文（照合と照らし直しに使う） */
+export type Doc = { source: Source; blocks: Block[]; text: string; fingerprint: Fingerprint };
+
+const isMarkdownPath = (p: string) => /\.(md|mdx|markdown)$/i.test(p);
+
+/** 原文の形から塊を作る（取得経路によらず1か所で決める） */
+function toBlocks(body: string, format: "html" | "markdown" | "plain", url: string): { title: string | null; blocks: Block[] } {
+  if (format === "html") return extractHtml(body, url);
+  if (format === "markdown") return { title: null, blocks: blocksFromMarkdown(body) };
+  return { title: null, blocks: blocksFromPlainText(body) };
+}
+
+async function makeDoc(source: Source, blocks: Block[], fp: Omit<Fingerprint, "textHash"> = {}): Promise<Doc> {
+  const text = docText(blocks);
+  return { source, blocks, text, fingerprint: { ...fp, textHash: await textHash(text) } };
+}
 
 export type FetchResult =
   | { ok: true; doc: Doc }
@@ -178,17 +193,10 @@ export class Gateway {
     const rawUrl = `https://raw.githubusercontent.com/${c.owner}/${c.repo}/${sha ?? c.ref}/${c.path}`;
     const r = await this.raw(rawUrl);
     if (!r.ok) return this.fail(c.url, { what: c.url, why: r.status === 404 ? "error" : "blocked", detail: `HTTP ${r.status}` });
-    const text = (await r.text()).slice(0, MAX_BODY_CHARS);
-    const fingerprint: Fingerprint = { textHash: await textHash(text) };
-    if (sha) fingerprint.commit = sha;
-    return {
-      ok: true,
-      doc: {
-        source: { kind: "github", url: c.url, title: `${c.owner}/${c.repo}/${c.path}`, locator: `${c.owner}/${c.repo}@${sha ?? c.ref}:${c.path}` },
-        text,
-        fingerprint,
-      },
-    };
+    const body = (await r.text()).slice(0, MAX_BODY_CHARS);
+    const { blocks } = toBlocks(body, isMarkdownPath(c.path) ? "markdown" : "plain", rawUrl);
+    const source: Source = { kind: "github", url: c.url, title: `${c.owner}/${c.repo}/${c.path}`, locator: `${c.owner}/${c.repo}@${sha ?? c.ref}:${c.path}` };
+    return { ok: true, doc: await makeDoc(source, blocks, sha ? { commit: sha } : {}) };
   }
 
   /** arXiv の最新の版番号（照らし直しの指紋） */
@@ -208,15 +216,13 @@ export class Gateway {
     const r = await this.raw(htmlUrl);
     if (!r.ok) return this.fail(c.url, { what: c.url, why: "unsupported", detail: `HTML 版がない（HTTP ${r.status}）。PDF は未対応` });
     const html = (await r.text()).slice(0, MAX_BODY_CHARS);
-    const { title, text } = extractHtml(html, htmlUrl);
-    const fingerprint: Fingerprint = { textHash: await textHash(text) };
-    if (version) fingerprint.arxivVersion = version;
+    const { title, blocks } = toBlocks(html, "html", htmlUrl);
     const source: Source = { kind: "arxiv", url: `https://arxiv.org/abs/${c.id}`, locator: `arXiv:${c.id}${version ?? ""}` };
     if (title) source.title = title;
-    return { ok: true, doc: { source, text, fingerprint } };
+    return { ok: true, doc: await makeDoc(source, blocks, version ? { arxivVersion: version } : {}) };
   }
 
-  private async fetchWeb(url: string, conditional?: Fingerprint): Promise<FetchResult> {
+  private async fetchWeb(url: string, conditional?: Fingerprint, hops = 0): Promise<FetchResult> {
     if (!(await this.robotsAllow(url))) return this.fail(url, { what: url, why: "robots" });
     const headers: Record<string, string> = {};
     if (conditional?.etag) headers["If-None-Match"] = conditional.etag;
@@ -230,21 +236,26 @@ export class Gateway {
     const ct = r.headers.get("content-type") ?? "";
     if (/pdf/i.test(ct)) return this.fail(url, { what: url, why: "unsupported", detail: "PDF は未対応" });
     const body = (await r.text()).slice(0, MAX_BODY_CHARS);
-    let title: string | null = null;
-    let text = body;
-    if (/html/i.test(ct) || /^\s*<(!doctype|html)/i.test(body)) {
-      const ex = extractHtml(body, url);
-      title = ex.title;
-      text = ex.text;
+    const isHtml = /html/i.test(ct) || /^\s*<(!doctype|html)/i.test(body);
+    if (isHtml && hops === 0) {
+      // <meta http-equiv="refresh"> の転送（例：…/releases/latest/）は1回だけ追う。転送先にも方針と robots を当てる
+      const to = metaRefreshTarget(body, url);
+      if (to && to !== url) {
+        const pc = this.policyCutoff(to);
+        if (pc) return this.fail(url, pc);
+        return this.fetchWeb(to, undefined, 1);
+      }
     }
-    const fingerprint: Fingerprint = { textHash: await textHash(text) };
+    const format = isHtml ? "html" : /markdown/i.test(ct) || isMarkdownPath(new URL(url).pathname) ? "markdown" : "plain";
+    const { title, blocks } = toBlocks(body, format, url);
+    const fp: Omit<Fingerprint, "textHash"> = {};
     const etag = r.headers.get("etag");
     const lm = r.headers.get("last-modified");
-    if (etag) fingerprint.etag = etag;
-    if (lm) fingerprint.lastModified = lm;
+    if (etag) fp.etag = etag;
+    if (lm) fp.lastModified = lm;
     const source: Source = { kind: "web", url, locator: url };
     if (title) source.title = title;
-    return { ok: true, doc: { source, text, fingerprint } };
+    return { ok: true, doc: await makeDoc(source, blocks, fp) };
   }
 
   /** 検索。結果は保存しない。禁止・除外の取得先を外し、一次資料を前に並べる */

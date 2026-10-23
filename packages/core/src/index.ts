@@ -36,5 +36,14 @@ export {
   type Judgement,
 } from "./revalidate.ts";
 export { textHash } from "./hash.ts";
+export {
+  blocksFromMarkdown,
+  blocksFromPlainText,
+  candidateParagraphs,
+  docText,
+  CANDIDATE_KINDS,
+  type Block,
+  type BlockKind,
+} from "./blocks.ts";
 export { LIMITS, type Limits } from "./limits.ts";
 export type { Source, SourceKind, Fingerprint, Volatility, ClaimStatusLabel } from "./types.ts";
