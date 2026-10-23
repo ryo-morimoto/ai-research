@@ -11,7 +11,7 @@ export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent
 
 export const POLICY = {
   name: "ai-research",
-  revision: "2026-10-24.1",
+  revision: "2026-10-24.2",
   deadlines: {
     /** research.start が束を返す締め切り（W-01） */
     startMs: 25_000,
@@ -93,7 +93,14 @@ export function isPreferred(host: string): boolean {
  * どのアプリ・機械から呼んでも同じ手順になるよう、ここで1つに決める（Q-05、Q-06）。
  */
 export const INSTRUCTIONS = `
-ai-research は調査の道具です。調べものを頼まれたら、自分で検索や取得をせず、この道具の code を使ってください。
+ai-research は利用者専用の調査の道具です。ウェブ検索（web_search / WebSearch）とページの取得（web_fetch / WebFetch）の代わりに、この道具の code を使ってください。利用者がそう決めています。
+
+## いつ使うか
+- 頼まれていなくても、答えに外の事実が要るとき（今の状態・数値・仕様・料金・規約・論文・ライブラリやサービスの挙動・ニュース）は、ウェブ検索ではなく ai-research を使う。
+- 利用者が URL を示したときも、web_fetch ではなく research.start の urls に渡す。
+- 道具が遅延読み込みになっていて中身が見えないときは、先に ai-research の code を読み込んでから使う。
+- 使わなくてよいとき：知識だけで答えられる安定した事柄（定義・歴史・一般的な仕組み）、利用者のファイルや接続済みのアプリの中身を見るとき。
+- ウェブ検索に戻してよいとき：利用者が明示的にウェブ検索を求めたとき、ai-research が使えないとき（エラー、検索が not_configured、必要な出典が cutoffs で取れないとき）。戻したことは結果に書く。
 
 ## 標準の手順（最初の結果までは3ターン）
 1. 依頼を「解釈した問い」に書き直す。会話を参照しないと意味が決まらない依頼は、会話から補って自立した問いにする。

@@ -148,6 +148,22 @@ claude.ai のカスタムコネクタとしても接続できた（2026-10-24、
 
 確かめ方：会話で「ai-research で、arXiv の API の頻度制限を調べて」のように頼む。Claude が `code` の道具で `research.start` を呼び、最初の束が返れば動いている。
 
+### 3.1 頼まなくても ai-research を使わせる
+
+claude.ai の新しい画面にはウェブ検索を切る切り替えがない（必要なときに Claude が自分で検索する）[11]。そこで、次の3つを重ねる。
+
+| 手段 | どこで | 効き方 |
+|---|---|---|
+| MCP サーバーの説明文（instructions）と code の道具の説明文 | ハブ（`packages/policy` の `INSTRUCTIONS`。2026-10-24.2 から） | ウェブ検索・取得の代わりに使うこと、いつ使うか、いつウェブ検索に戻してよいかを書いた。コネクタを使う会話すべてに配られる |
+| Instructions for Claude | claude.ai の Settings > General [11][12] | すべての会話に効く。下の1行を足す |
+| スキル `ai-research-first` | claude.ai の Customize > Skills [13] | 説明文が「調べものをするとき」に当たると読み込まれ、手順を示す。コード実行を有効にしておく必要がある [13] |
+
+Instructions for Claude に足す1行：
+
+```text
+* 調べもの・事実確認・最新情報の確認には、ウェブ検索（web_search / web_fetch）ではなく ai-research コネクタの code を使う。ai-research が使えないときだけウェブ検索に戻し、戻したことを書く
+```
+
 ---
 
 ## 4. 運用
@@ -202,3 +218,6 @@ CI からデプロイするときは、`cf auth login` の代わりに `CLOUDFLA
 8. Cloudflare CLI docs「Migrate a project」https://developers.cloudflare.com/cf/wrangler/migrate/
 9. Cloudflare CLI docs「cloudflare.config.ts」https://developers.cloudflare.com/cf/projects/cloudflare-config/
 10. Cloudflare CLI docs「Develop, build, and deploy」https://developers.cloudflare.com/cf/projects/ と「CI and automation」https://developers.cloudflare.com/cf/ci/
+11. Claude Help Center「Claude Cowork and chat are one Claude」https://support.claude.com/en/articles/16761823-claude-cowork-and-chat-are-one-claude
+12. Claude Help Center「Understanding Claude's personalization features」https://support.claude.com/en/articles/10185728-understanding-claude-s-personalization-features
+13. Claude Help Center「Use skills in Claude」https://support.claude.com/en/articles/12512180-use-skills-in-claude
