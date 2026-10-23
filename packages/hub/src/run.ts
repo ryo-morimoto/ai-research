@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  normalize,
   selectPassages,
   splitParagraphs,
   verifyQuote,
@@ -111,6 +112,8 @@ export class RunDO extends DurableObject<Env> {
   private gateway: Gateway | null = null;
   private counters = { task: 0, source: 0, passage: 0, hit: 0, ev: 0 };
   private events: RunEvent[] = [];
+  /** 版ごとに、束に入れた段落の本文（正規化後）。同じ文を二度届けない */
+  private shownTexts = new Map<number, Set<string>>();
 
   // ---- 状態の読み書き -------------------------------------------------------
 
@@ -403,9 +406,22 @@ export class RunDO extends DurableObject<Env> {
 
     // 予算の残りに収まるように段落を選ぶ（INV-9）
     const remaining = Math.max(0, cap - m.budget.used - estimateJsonTokens(base));
-    const candidates: Paragraph[] = [...this.paras.values()]
-      .filter((p) => p.v === v && !p.delivered)
-      .map((p) => ({ sourceId: p.sourceId, index: p.index, text: p.text, passageId: p.passageId }) as Paragraph & { passageId: string });
+    // 同じ本文の段落（同じページの重複、同じ文書の別の URL）は1つだけ候補にする。
+    // 既に届けた本文と同じものは、届けたことにして外す（予算を使わない）
+    const shown = this.shownTexts.get(v) ?? new Set<string>();
+    this.shownTexts.set(v, shown);
+    const seen = new Set<string>();
+    const candidates: Paragraph[] = [];
+    for (const p of this.paras.values()) {
+      if (p.v !== v || p.delivered) continue;
+      const key = normalize(p.text);
+      if (shown.has(key) || seen.has(key)) {
+        p.delivered = true;
+        continue;
+      }
+      seen.add(key);
+      candidates.push({ sourceId: p.sourceId, index: p.index, text: p.text, passageId: p.passageId } as Paragraph & { passageId: string });
+    }
     const selected = selectPassages(candidates, [m.question, ...m.queries], {
       passageMaxChars: POLICY.limits.passageMaxChars,
       passagesPerBundle: POLICY.limits.passagesPerBundle,
@@ -438,7 +454,10 @@ export class RunDO extends DurableObject<Env> {
     // 届けた印を付ける
     for (const p of bundle.passages) {
       const e = this.paras.get(p.passageId);
-      if (e) e.delivered = true;
+      if (e) {
+        e.delivered = true;
+        shown.add(normalize(e.text));
+      }
     }
     for (const h of bundle.ledgerHits) {
       const e = this.hits.get(h.passageId);

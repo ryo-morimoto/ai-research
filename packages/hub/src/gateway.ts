@@ -78,21 +78,26 @@ export class Gateway {
     const onAbort = () => controller.abort();
     if (this.opts.signal?.aborted) controller.abort();
     this.opts.signal?.addEventListener("abort", onAbort);
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs * timeScale(this.env));
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await withLease(
         this.env,
         host,
         async () => {
+          // 取得の時間上限は、順番が来て要求を出してから数える
+          timer = setTimeout(() => controller.abort(), this.timeoutMs * timeScale(this.env));
           const headers = new Headers(init.headers);
           if (!headers.has("User-Agent")) headers.set("User-Agent", POLICY.userAgent);
           const req: RequestInit = { ...init, headers, signal: controller.signal, redirect: "follow" };
-          return this.env.TEST_UPSTREAM ? this.env.TEST_UPSTREAM.fetch(url, req) : fetch(url, req);
+          const res = await (this.env.TEST_UPSTREAM ? this.env.TEST_UPSTREAM.fetch(url, req) : fetch(url, req));
+          // 本文の読み取りも上限に含めるため、ここで読み切る
+          const body = await res.arrayBuffer();
+          return new Response(res.status === 304 || res.status === 204 ? null : body, { status: res.status, statusText: res.statusText, headers: res.headers });
         },
-        { waitLimitMs: this.opts.leaseWaitMs ?? this.timeoutMs, signal: controller.signal },
+        { waitLimitMs: this.opts.leaseWaitMs ?? deadlines(this.env).leaseWaitMs, signal: controller.signal },
       );
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       this.opts.signal?.removeEventListener("abort", onAbort);
     }
   }

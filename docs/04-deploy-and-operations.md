@@ -116,7 +116,21 @@ pnpm exec cf workers secrets update --worker ai-research --type secret_text
 | 動的登録 → 同意ページ（合言葉）→ トークン → `tools/list` | 4つの道具（code、ledger_search、ledger_forget、ledger_export） |
 | `code` の道具で `research.start`（Brave の検索あり） | 9.2秒で最初の束。段落12件、出典4件（developers.cloudflare.com）、打ち切りなし、使用量 1,552 トークン |
 
-本番でも Worker Loader（code mode の実行環境）と Brave の検索が動いた。claude.ai からの接続は §3 で確かめる。
+本番でも Worker Loader（code mode の実行環境）と Brave の検索が動いた。
+
+claude.ai のカスタムコネクタとしても接続できた（2026-10-24、§3 の手順。OAuth client は「Use Claude's published identity」）。コネクタ経由で、1回の調査（start → verify → next）と、2回目の同じ問いでの台帳の照らし直しを確かめた。
+
+| 確かめたこと | 結果 |
+|---|---|
+| コネクタ経由の `research.start` | 段落12件。出典は developers.cloudflare.com と cloudflare-docs の GitHub |
+| `research.verify`（原文どおりの引用4件と、数字を書き換えた引用1件） | 4件が確認済で台帳に入り、書き換えた1件は未確認（not_in_source）で入らない |
+| 2回目の同じ問い | 台帳の4件が照らし直しで確認済になって返る |
+
+この確認で見つけて直したこと：
+
+- 同じ本文の段落（同じページの重複、cloudflare-docs の元の文書と公開ページ）が束に二重に入っていた → 同じ本文は1回だけ届けるようにした。
+- 同じ取得先（developers.cloudflare.com）への取得が重なると、頻度制限の順番待ちが取得の時間上限（8秒）に数えられ、打ち切られていた → 時間上限は要求を出してから数え、順番待ちには別の上限（60秒、`deadlines.leaseWaitMs`）を設けた。直した後は打ち切りなしで、最初の束が 17 秒で返った。
+
 
 ---
 

@@ -55,6 +55,15 @@ describe("取得の出口（Gateway）", () => {
     expect(await g.fetchDoc("https://slow.example.com/page")).toMatchObject({ ok: false, cutoff: { why: "timeout" } });
   });
 
+  it("頻度制限の順番待ちは取得の時間上限に数えない（同じ取得先への取得が重なっても打ち切らない）", async () => {
+    const urls = Array.from({ length: 6 }, (_, i) => `https://queue.example.com/p${i}`);
+    for (const u of urls) await upstreamSet({ url: u, delayMs: 100, contentType: "text/html", body: `<article><p>${u} の本文。</p></article>` });
+    const g = new Gateway(env);
+    // 同時2本・1本あたり 100ms なので、最後の取得は時間上限（8秒 × 縮尺 = 160ms）より後に始まる
+    const rs = await Promise.all(urls.map((u) => g.fetchDoc(u)));
+    expect(rs.map((r) => r.ok)).toEqual(urls.map(() => true));
+  });
+
   it("INV-14：同じ実行の中で失敗した URL には二度と要求を出さない", async () => {
     const g = new Gateway(env);
     await g.fetchDoc("https://blocked.example.com/page");

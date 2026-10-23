@@ -94,6 +94,22 @@ describe("調査の実行（RunDO）", () => {
     await trace(stub);
   });
 
+  it("同じ本文の段落は1回だけ届ける（同じページの重複も、別の URL の同じ文も）", async () => {
+    const { id, stub } = newRun();
+    const dup = "Each SQLite-backed Durable Object has a storage limit of 10 GB on a Workers Paid plan.";
+    await upstreamSet({ url: "https://dup.example.com/a", contentType: "text/html", body: `<article><p>${dup}</p><p>別の段落の本文。</p><p>${dup}</p></article>` });
+    await upstreamSet({ url: "https://dup.example.com/b", contentType: "text/html", body: `<article><p>${dup}</p></article>` });
+    const b1 = await stub.start(id, { question: "storage limit", queries: [], urls: ["https://dup.example.com/a", "https://dup.example.com/b"] });
+    const later = await stub.next(0);
+    const all = [...b1.passages, ...later.passages];
+    expect(all.filter((p) => p.text === dup).length).toBe(1);
+    // 外した重複の段落の ID でも、引用は照合できる
+    const dupIds = (await inspect(stub)).paras.map((p) => p.passageId);
+    const v = await stub.verify(dupIds.map((pid) => ({ text: "x", cite: [{ passageId: pid, quote: "storage limit of 10 GB" }] })));
+    expect(v.statuses.filter((s) => s.status === "確認済").length).toBe(3);
+    await trace(stub);
+  });
+
   it("Q-06（上書きの試験）：原文にない引用は台帳に入らない。原文どおりの引用だけが入る", async () => {
     const { id, stub } = newRun();
     const b = await stub.start(id, { question: "取得先の制限", queries: ["limits"] });

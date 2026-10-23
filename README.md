@@ -28,7 +28,7 @@ bench                 計測（試験用の依頼セット、呼び出し器。M
 
 ## 状態
 
-実装 v0.1。ハブは動き、結合試験（workerd の上、偽の取得先に対して）が通る。本番へのデプロイと claude.ai からの接続は未確認（[docs/04](docs/04-deploy-and-operations.md)）。個別の道具（`web.*`・`github.*`・`arxiv.*`）、計測、トレース検証の TLC での照合はこれから。
+実装 v0.1。Cloudflare にデプロイし、claude.ai のカスタムコネクタから使えることを確かめた（[docs/04](docs/04-deploy-and-operations.md) §2.7）。結合試験（workerd の上、偽の取得先に対して）が通る。個別の道具（`web.*`・`github.*`・`arxiv.*`）、計測、トレース検証の TLC での照合はこれから。
 
 ## 開発
 

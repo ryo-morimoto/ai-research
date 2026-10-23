@@ -15,8 +15,10 @@ export const POLICY = {
   deadlines: {
     /** research.start が束を返す締め切り（W-01） */
     startMs: 25_000,
-    /** 取得1件の時間上限（P-02） */
+    /** 取得1件の時間上限（P-02）。頻度制限の順番待ちは含めない */
     fetchMs: 8_000,
+    /** 頻度制限の順番待ちの上限。待っている作業は束では打ち切り中として見え、続きで届く */
+    leaseWaitMs: 60_000,
     /** 続きを集める上限。依頼から（W-04） */
     continueUntilMs: 240_000,
     /** research.next が待つ上限 */
