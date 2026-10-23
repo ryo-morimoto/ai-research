@@ -8,3 +8,6 @@ _apalache-out/
 specs/out/
 bench/results/
 .DS_Store
+.cloudflare/
+.secrets.env
+*.secrets.env
