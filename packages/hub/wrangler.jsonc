@@ -19,7 +19,7 @@
   // OAuth の状態。KV 名前空間を cf で作り、id を差し替える（docs/04 §2.2）
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" }],
   "vars": {
-    "SEARCH_PROVIDER": "none"
+    "SEARCH_PROVIDER": "brave"
   },
   "observability": { "enabled": true }
 }
