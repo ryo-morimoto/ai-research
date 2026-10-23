@@ -150,21 +150,21 @@ claude.ai のカスタムコネクタとしても接続できた（2026-10-24、
 
 ### 3.1 頼まなくても ai-research を使わせる
 
-claude.ai の新しい画面にはウェブ検索を切る切り替えがない（必要なときに Claude が自分で検索する）[11]。そこで、次の3つを重ねる。
+設計は docs/02 §7.4〜7.8（制約 v0.6 の U-03・Q-07）。登録はアカウントに3つだけで、各機械では何もしない。
 
-| 手段 | どこで | 効き方 |
-|---|---|---|
-| MCP サーバーの説明文（instructions）と code の道具の説明文 | ハブ（`packages/policy` の `INSTRUCTIONS`。2026-10-24.2 から） | ウェブ検索・取得の代わりに使うこと、いつ使うか、いつウェブ検索に戻してよいかを書いた。コネクタを使う会話すべてに配られる |
-| Instructions for Claude | claude.ai の Settings > General [11][12] | すべての会話に効く。下の1行を足す |
-| スキル `ai-research-first` | claude.ai の Customize > Skills [13] | 説明文が「調べものをするとき」に当たると読み込まれ、手順を示す。コード実行を有効にしておく必要がある [13] |
-
-サーバーの説明文だけでは足りない。2026-10-24 の作業の会話では、ai-research の説明文（「調べものには自分で検索せずこの道具を使う」）が読み込まれていたのに、Claude はウェブ検索とページの取得を使った。会話の側の指示（Instructions for Claude）とスキルの両方を入れる。
+| 登録するもの | 状態 |
+|---|---|
+| カスタムコネクタ（§3） | 済み |
+| プラグイン `ai-research`（スキル `ai-research-first` と、WebSearch / WebFetch を止めて案内する http のフック）。claude.ai の Customize > Plugins > Add marketplace で、このリポジトリを追加する | 未実装（M5） |
+| Instructions for Claude（Settings > General）に1行 | 利用者が追加する |
 
 Instructions for Claude に足す1行：
 
 ```text
-* 調べもの・事実確認・最新情報の確認には、ウェブ検索（web_search / web_fetch）ではなく ai-research コネクタの code を使う。ai-research が使えないときだけウェブ検索に戻し、戻したことを書く
+* 調べもの・事実確認・最新情報の確認には、ウェブ検索（web_search / web_fetch）ではなく ai-research コネクタの code を使う。ai-research が使えないときだけウェブ検索に戻し、結果に「経路外」と理由を書く
 ```
+
+ハブの道具の説明文（`packages/policy` の `INSTRUCTIONS`）にも同じ方針を書いてあるが、説明文だけでは足りなかった（2026-10-24 の作業の会話で、説明文が読み込まれていても組み込みのウェブ検索が使われた）。
 
 ---
 
