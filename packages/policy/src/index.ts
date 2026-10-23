@@ -168,7 +168,7 @@ export const INSTRUCTIONS = `ai-research は利用者専用の調査の道具（
 const PROCEDURE = `
 ## 使い方
 1. 依頼を「解釈した問い」（会話を見なくても意味が決まる文）に直し、research.start を呼ぶ。
-   - 1つの事実・1つの URL の確認は mode: "lookup"（urls があれば queries は省く）。比較・調査は mode: "survey"（queries を3〜5個）。
+   - 1つの事実・1つの URL の確認は mode: "lookup"（urls があれば検索はしないが、queries は段落を選ぶ手がかりに使う）。比較・調査は mode: "survey"（queries を3〜5個）。
 2. ledgerHits の「確認済」は照らし直し済みなので、そのまま根拠にできる（verify は要らない）。
    passages を根拠にするときは、主張ごとに段落 ID と段落の text をそのまま写した引用を付け、research.verify で照合する。
    survey の続きは research.next で受け取り、答えが出たら research.close。向きが変わったら research.steer。深掘りは利用者が求めたときだけ research.deepen。
@@ -180,7 +180,7 @@ const PROCEDURE = `
 - アフィリエイト・SEO 目的のサイトより、論文と一次資料を優先する。
 
 \`\`\`js
-async () => research.start({ question: "…", mode: "lookup", urls: ["https://…"] })
+async () => research.start({ question: "…", mode: "lookup", queries: ["…"], urls: ["https://…"] })
 \`\`\`
 \`\`\`js
 async () => ({ v: await research.verify("RUN_ID", [{ text: "…", cite: [{ passageId: "p1", quote: "…" }] }]), more: await research.next("RUN_ID") })

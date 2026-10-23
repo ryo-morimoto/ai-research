@@ -9,7 +9,8 @@ import { LIMITS } from "./limits.ts";
  * 上位から選ぶ。出典1つあたりの件数・段落の長さ・束全体の大きさの上限を守る（性質 P5）。
  */
 
-export type Paragraph = { sourceId: string; index: number; text: string };
+/** context（見出し・表の見出し行）は関連の点数に使い、照合には使わない（設計 v1.3 §8.1.3） */
+export type Paragraph = { sourceId: string; index: number; text: string; context?: string };
 
 export type Selected = Paragraph & { score: number; tokens: number };
 
@@ -53,7 +54,7 @@ export function scoreParagraphs(paragraphs: Paragraph[], query: string[]): Map<P
   const k1 = 1.2;
   const b = 0.75;
   const qTerms = new Set(query.flatMap((q) => terms(q)));
-  const docs = paragraphs.map((p) => terms(p.text));
+  const docs = paragraphs.map((p) => terms(p.context ? `${p.context} ${p.text}` : p.text));
   const avgLen = docs.reduce((a, d) => a + d.length, 0) / Math.max(1, docs.length);
   const df = new Map<string, number>();
   for (const d of docs) for (const t of new Set(d)) if (qTerms.has(t)) df.set(t, (df.get(t) ?? 0) + 1);

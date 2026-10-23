@@ -192,3 +192,14 @@ describe("rankRelevant：関連の下限と件数の上限", () => {
     expect(r.length).toBe(1);
   });
 });
+
+describe("段落の点数に context を使う（照合には使わない）", () => {
+  it("表の行は、見出し行の語でも問いに当たる", () => {
+    const rows = [
+      { sourceId: "s", index: 0, text: "CPU time per HTTP request | 10 ms | 5 min", context: "Feature | Workers Free | Workers Paid" },
+      { sourceId: "s", index: 1, text: "Memory | 128 MB | 128 MB" },
+    ];
+    const r = selectPassages(rows, ["Workers Free CPU"], { passageMaxChars: 600, passagesPerBundle: 1, passagesPerSource: 4, maxTokens: 6000 });
+    expect(r.map((x) => x.text)).toEqual(["CPU time per HTTP request | 10 ms | 5 min"]);
+  });
+});

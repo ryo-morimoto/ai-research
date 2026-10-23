@@ -47,6 +47,12 @@ SPEC_MODE=full pnpm spec:check # Apalache のモデル検査も（Java 17 以上
 
 性質ベーステストの回数とシードは `FC_RUNS` と `FC_SEED` で変えられる。
 
+会話の側が払う量（会話に入ったトークン、段落の数、呼び出しの回数）は、依頼セットを Claude Code で実行して測る：
+
+```sh
+python3 -I bench/run_cases.py bench/cases/feedback-2026-10-24.json --mcp-config <トークン入りの MCP 設定> --plugin-dir plugins/ai-research --label <名前>
+```
+
 ## ライセンス
 
 [LICENSE](LICENSE)

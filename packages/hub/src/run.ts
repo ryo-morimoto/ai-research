@@ -445,7 +445,7 @@ export class RunDO extends DurableObject<Env> {
         continue;
       }
       seen.add(key);
-      candidates.push({ sourceId: p.sourceId, index: p.index, text: p.text, passageId: p.passageId } as Paragraph & { passageId: string });
+      candidates.push({ sourceId: p.sourceId, index: p.index, text: p.text, passageId: p.passageId, ...(p.context ? { context: p.context } : {}) } as Paragraph & { passageId: string });
     }
     const selected = selectPassages(candidates, [m.question, ...m.queries], {
       passageMaxChars: POLICY.limits.passageMaxChars,
