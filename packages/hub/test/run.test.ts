@@ -193,6 +193,18 @@ describe("調査の実行（RunDO）", () => {
     expect(v.statuses[0]!.status).toBe("確認済");
   });
 
+  it("退避の後も段落 ID を使い回さない（古い版の ID は stale_version、新しい ID は前と重ならない）", async () => {
+    const { id, stub } = newRun();
+    const b1 = await stub.start(id, { question: "プロンプトキャッシュ", queries: ["cache"] });
+    const old = passageWith(b1, "前置きが完全に一致")!;
+    await evictDurableObject(stub);
+    const b2 = await stub.steer({ question: "取得先の制限", queries: ["limits"] });
+    const oldIds = new Set(b1.passages.map((p) => p.passageId));
+    for (const p of b2.passages) expect(oldIds.has(p.passageId), `ID ${p.passageId} を使い回している`).toBe(false);
+    const v = await stub.verify([{ text: "x", cite: [{ passageId: old.passageId, quote: "前置きが完全に一致" }] }]);
+    expect(v.statuses[0]).toMatchObject({ status: "未確認", reason: "stale_version" });
+  });
+
   it("Q-02：台帳の抜き書きを照らし直す（変わっていなければ確認済、消えていれば未確認）", async () => {
     // 1回目：照合して台帳に入れる
     const a = newRun();

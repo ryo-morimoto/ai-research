@@ -93,6 +93,8 @@ type Meta = {
   manifest: Manifest;
   /** 段落のメタデータ（本文は持たない。INV-13） */
   passageMeta: Record<string, { sourceId: string; url: string; locator: string; v: number; index: number }>;
+  /** ID の払い出しの続き。退避の後も同じ ID を使い回さないために保存する */
+  counters?: { task: number; source: number; passage: number; hit: number };
 };
 
 type RunEvent = { ev: number; at: number; type: string; [k: string]: unknown };
@@ -122,13 +124,18 @@ export class RunDO extends DurableObject<Env> {
       this.meta = (await this.ctx.storage.get<Meta>("meta")) ?? null;
       this.events = (await this.ctx.storage.get<RunEvent[]>("events")) ?? [];
       this.counters.ev = this.events.at(-1)?.ev ?? 0;
+      if (this.meta?.counters) Object.assign(this.counters, this.meta.counters);
       this.loaded = true;
     }
     return this.meta;
   }
 
   private async save(): Promise<void> {
-    if (this.meta) await this.ctx.storage.put("meta", this.meta);
+    if (this.meta) {
+      const { task, source, passage, hit } = this.counters;
+      this.meta.counters = { task, source, passage, hit };
+      await this.ctx.storage.put("meta", this.meta);
+    }
     await this.ctx.storage.put("events", this.events.slice(-MAX_EVENTS));
   }
 
