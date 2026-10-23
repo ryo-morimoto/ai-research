@@ -1,0 +1,22 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ai-research",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "LEDGER", "class_name": "LedgerDO" },
+      { "name": "RUNS", "class_name": "RunDO" },
+      { "name": "LIMITER", "class_name": "HostLimiterDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerDO", "RunDO", "HostLimiterDO"] }],
+  "worker_loaders": [{ "binding": "LOADER" }],
+  // OAuth の状態（wrangler kv namespace create OAUTH_KV で作り、id を差し替える）
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" }],
+  "vars": {
+    "SEARCH_PROVIDER": "none"
+  },
+  "observability": { "enabled": true }
+}

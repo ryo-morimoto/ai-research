@@ -55,8 +55,9 @@ module ledger {
     runs' = RUNS.mapBy(r => { started: false, snapshot: 0, candidates: Set(), marks: Set() }),
   }
 
+  // 墓標は、それより前に書かれたレコードを消す。墓標より後に確かめ直したレコードは生きている
   pure def tombstoned(ts: Set[Tomb], r: LRecord, upto: int): bool =
-    ts.exists(t => t.src == r.src and t.ex == r.ex and t.seq <= upto)
+    ts.exists(t => t.src == r.src and t.ex == r.ex and t.seq <= upto and t.seq > r.seq)
 
   // 出典が変わる
   action change(s: str): bool = all {
