@@ -13,16 +13,35 @@ import type { Env } from "./env.ts";
 
 export type RouteDecision =
   | { kind: "deny"; reason: string }
-  | { kind: "allow"; why: "explicit" | "cutoff"; context: string }
+  | { kind: "allow"; why: "explicit" | "cutoff" | "noConnector"; context: string }
   | { kind: "pass" };
 
-type Counts = { denied: number; allowedExplicit: number; allowedCutoff: number; passed: number; researchStarts: number };
+type Counts = {
+  denied: number;
+  allowedExplicit: number;
+  allowedCutoff: number;
+  allowedNoConnector: number;
+  passed: number;
+  researchStarts: number;
+};
 type DayCounts = Record<string, Counts>;
 
-const zero = (): Counts => ({ denied: 0, allowedExplicit: 0, allowedCutoff: 0, passed: 0, researchStarts: 0 });
+const zero = (): Counts => ({ denied: 0, allowedExplicit: 0, allowedCutoff: 0, allowedNoConnector: 0, passed: 0, researchStarts: 0 });
 const dayOf = (ms: number) => new Date(ms + 9 * 3_600_000).toISOString().slice(0, 10); // JST の日付
 
 const EXPLICIT = POLICY.routing.explicitPatterns.map((p) => new RegExp(p, "u"));
+const CONNECTOR_TOOL = new RegExp(POLICY.routing.connectorToolPattern, "i");
+
+/** ai-research の道具か（面によって接頭辞が違う） */
+export function isConnectorTool(name: string): boolean {
+  return CONNECTOR_TOOL.test(name);
+}
+
+/** ツール検索の結果に ai-research の道具が含まれているか */
+export function toolSearchFoundConnector(response: unknown): boolean {
+  const s = typeof response === "string" ? response : JSON.stringify(response ?? "");
+  return /mcp__[^"\s]*ai-?research[^"\s]*__/i.test(s);
+}
 
 /** 依頼文がウェブ検索を明示しているか（policy の言い方に当てる） */
 export function isExplicitWebRequest(prompt: string): boolean {
@@ -53,12 +72,14 @@ export class RouteDO extends DurableObject<Env> {
       this.sql.exec(`CREATE TABLE IF NOT EXISTS explicit (session TEXT PRIMARY KEY, on_flag INTEGER NOT NULL, expires INTEGER NOT NULL)`);
       this.sql.exec(`CREATE TABLE IF NOT EXISTS cutoffs (url TEXT PRIMARY KEY, why TEXT NOT NULL, expires INTEGER NOT NULL)`);
       this.sql.exec(`CREATE TABLE IF NOT EXISTS counts (day TEXT PRIMARY KEY, json TEXT NOT NULL)`);
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS no_connector (session TEXT PRIMARY KEY, expires INTEGER NOT NULL)`);
     });
   }
 
   private prune(now: number): void {
     this.sql.exec(`DELETE FROM explicit WHERE expires <= ?`, now);
     this.sql.exec(`DELETE FROM cutoffs WHERE expires <= ?`, now);
+    this.sql.exec(`DELETE FROM no_connector WHERE expires <= ?`, now);
     const n = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM explicit`).one().n;
     if (n > POLICY.routing.maxSessions) {
       this.sql.exec(`DELETE FROM explicit WHERE session IN (SELECT session FROM explicit ORDER BY expires ASC LIMIT ?)`, n - POLICY.routing.maxSessions);
@@ -98,6 +119,19 @@ export class RouteDO extends DurableObject<Env> {
     );
   }
 
+  /** PostToolUse：ツール検索で ai-research が見つからなかった／ai-research の道具を使えた */
+  noteConnector(session: string, available: boolean): void {
+    const now = Date.now();
+    this.prune(now);
+    if (available) this.sql.exec(`DELETE FROM no_connector WHERE session = ?`, session);
+    else
+      this.sql.exec(
+        `INSERT INTO no_connector (session, expires) VALUES (?, ?) ON CONFLICT(session) DO UPDATE SET expires = excluded.expires`,
+        session,
+        now + POLICY.routing.noConnectorTtlMs,
+      );
+  }
+
   noteResearchStart(): void {
     this.bump("researchStarts");
   }
@@ -123,6 +157,11 @@ export class RouteDO extends DurableObject<Env> {
         return { kind: "allow", why: "cutoff", context: ROUTE_ALLOW_CONTEXT.cutoff };
       }
     }
+    const nc = this.sql.exec(`SELECT 1 FROM no_connector WHERE session = ? AND expires > ?`, input.session, now).toArray()[0];
+    if (nc) {
+      this.bump("allowedNoConnector", now);
+      return { kind: "allow", why: "noConnector", context: ROUTE_ALLOW_CONTEXT.noConnector };
+    }
     this.bump("denied", now);
     return { kind: "deny", reason: ROUTE_DENY_REASON };
   }
@@ -147,14 +186,15 @@ type HookInput = {
   hook_event_name?: string;
   tool_name?: string;
   tool_input?: { url?: unknown; query?: unknown; prompt?: unknown };
+  tool_response?: unknown;
   prompt?: string;
 };
 
-async function readHookInput(request: Request): Promise<HookInput | null> {
+async function readHookInput(request: Request, maxBytes: number): Promise<HookInput | null> {
   const len = Number(request.headers.get("content-length") ?? "0");
-  if (len > POLICY.routing.maxBodyBytes) return null;
+  if (len > maxBytes) return null;
   const text = await request.text();
-  if (text.length > POLICY.routing.maxBodyBytes) return null;
+  if (text.length > maxBytes) return null;
   try {
     const j = JSON.parse(text) as unknown;
     return j && typeof j === "object" ? (j as HookInput) : null;
@@ -167,20 +207,33 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
 
 /**
- * POST /hooks/pre-tool-use、POST /hooks/user-prompt-submit。
+ * POST /hooks/pre-tool-use、/hooks/user-prompt-submit、/hooks/post-tool-use。
  * 応答は command フックと同じ JSON の形（http フックの仕様）。
  * 読めない入力には 400 を返す。http フックでは止めない側に倒れる。
  */
 export async function handleHook(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
   const path = new URL(request.url).pathname;
-  const input = await readHookInput(request);
+  const input = await readHookInput(
+    request,
+    path === "/hooks/post-tool-use" ? POLICY.routing.maxPostToolBodyBytes : POLICY.routing.maxBodyBytes,
+  );
   if (!input) return json({ error: "bad input" }, 400);
   const session = typeof input.session_id === "string" && input.session_id.length <= 200 ? input.session_id : "";
   const stub = routeStub(env);
 
   if (path === "/hooks/user-prompt-submit") {
     if (session) await stub.notePrompt(session, isExplicitWebRequest(String(input.prompt ?? "")));
+    return json({});
+  }
+
+  if (path === "/hooks/post-tool-use") {
+    const tool = String(input.tool_name ?? "");
+    if (session && isConnectorTool(tool)) await stub.noteConnector(session, true);
+    else if (session && (POLICY.routing.toolSearchTools as readonly string[]).includes(tool)) {
+      const q = String(input.tool_input?.query ?? "");
+      if (/research/i.test(q)) await stub.noteConnector(session, toolSearchFoundConnector(input.tool_response));
+    }
     return json({});
   }
 

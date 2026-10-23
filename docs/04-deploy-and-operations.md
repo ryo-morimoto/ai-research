@@ -155,7 +155,7 @@ claude.ai のカスタムコネクタとしても接続できた（2026-10-24、
 | 登録するもの | 状態 |
 |---|---|
 | カスタムコネクタ（§3） | 済み |
-| プラグイン `ai-research`（スキル `ai-research-first` と、WebSearch / WebFetch を止めて案内する http のフック）。claude.ai の Customize > Plugins > Add marketplace で、このリポジトリを追加する | 未実装（M5） |
+| プラグイン `ai-research`（スキル `ai-research-first` と、WebSearch / WebFetch を止めて案内する http のフック）。claude.ai の Customize > Plugins > Add > Add marketplace で `ryo-morimoto/ai-research` を追加し、`ai-research` を入れる | 実装済み（M5）。利用者が追加する |
 | Instructions for Claude（Settings > General）に1行 | 利用者が追加する |
 
 Instructions for Claude に足す1行：
@@ -163,6 +163,8 @@ Instructions for Claude に足す1行：
 ```text
 * 調べもの・事実確認・最新情報の確認には、ウェブ検索（web_search / web_fetch）ではなく ai-research コネクタの code を使う。ai-research が使えないときだけウェブ検索に戻し、結果に「経路外」と理由を書く
 ```
+
+プラグインの中身と、フックがハブに送るものは `plugins/ai-research/README.md` にある。経路の計数は MCP の道具 `route_stats` で見られる。Claude Code での確認結果は docs/02 §7.6 の末尾。
 
 ハブの道具の説明文（`packages/policy` の `INSTRUCTIONS`）にも同じ方針を書いてあるが、説明文だけでは足りなかった（2026-10-24 の作業の会話で、説明文が読み込まれていても組み込みのウェブ検索が使われた）。
 

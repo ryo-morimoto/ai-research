@@ -30,6 +30,12 @@ bench                 計測（試験用の依頼セット、呼び出し器。M
 
 実装 v0.1。Cloudflare にデプロイし、claude.ai のカスタムコネクタから使えることを確かめた（[docs/04](docs/04-deploy-and-operations.md) §2.7）。結合試験（workerd の上、偽の取得先に対して）が通る。個別の道具（`web.*`・`github.*`・`arxiv.*`）、計測、トレース検証の TLC での照合はこれから。
 
+## 使い方（claude.ai のアカウントに3つ登録する）
+
+1. カスタムコネクタ：`https://ai-research.ryo-morimoto-dev.workers.dev/mcp`（docs/04 §3）
+2. プラグイン：Customize > Plugins > Add > Add marketplace で `ryo-morimoto/ai-research` を追加し、`ai-research` を入れる
+3. Instructions for Claude に1行（docs/04 §3.1）
+
 ## 開発
 
 ```sh

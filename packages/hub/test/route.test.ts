@@ -61,6 +61,23 @@ describe("経路の判断（フックの受け口、U-03・Q-07）", () => {
     expect((await pre("s5", "WebSearch", { query: "https://blocked.example.com/page" })).body.hookSpecificOutput.permissionDecision).toBe("deny");
   });
 
+  it("ツール検索で ai-research が見つからなかった会話では、経路外として通す。ai-research を使えたら元に戻る", async () => {
+    await prompt("s11", "調べて");
+    expect((await pre("s11", "WebSearch")).body.hookSpecificOutput.permissionDecision).toBe("deny");
+    await hook("post-tool-use", { session_id: "s11", hook_event_name: "PostToolUse", tool_name: "ToolSearch", tool_input: { query: "ai-research" }, tool_response: { matches: [], query: "ai-research", total_deferred_tools: 50 } });
+    const a = await pre("s11", "WebSearch");
+    expect(a.body.hookSpecificOutput.permissionDecision).toBeUndefined();
+    expect(a.body.hookSpecificOutput.additionalContext).toContain("経路外（ai-research が使えない）");
+    // 見つかった・使えた会話では止める
+    await hook("post-tool-use", { session_id: "s11", tool_name: "mcp__claude_ai_ai-research__code", tool_input: {}, tool_response: "{}" });
+    expect((await pre("s11", "WebSearch")).body.hookSpecificOutput.permissionDecision).toBe("deny");
+    await hook("post-tool-use", { session_id: "s12", tool_name: "ToolSearch", tool_input: { query: "select:mcp__ai-research__code" }, tool_response: { matches: ["mcp__ai-research__code"] } });
+    expect((await pre("s12", "WebSearch")).body.hookSpecificOutput.permissionDecision).toBe("deny");
+    // ai-research と関係のないツール検索では何も変えない
+    await hook("post-tool-use", { session_id: "s13", tool_name: "ToolSearch", tool_input: { query: "slack" }, tool_response: { matches: [] } });
+    expect((await pre("s13", "WebSearch")).body.hookSpecificOutput.permissionDecision).toBe("deny");
+  });
+
   it("経路の外の道具でなければ何もしない", async () => {
     const r = await pre("s6", "Read", { file_path: "/x" });
     expect(r.body).toEqual({});

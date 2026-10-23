@@ -11,7 +11,7 @@ export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent
 
 export const POLICY = {
   name: "ai-research",
-  revision: "2026-10-24.3",
+  revision: "2026-10-24.4",
   deadlines: {
     /** research.start が束を返す締め切り（W-01） */
     startMs: 25_000,
@@ -87,8 +87,15 @@ export const POLICY = {
     explicitTtlMs: 60 * 60_000,
     /** 覚えておく会話の数の上限 */
     maxSessions: 2_000,
-    /** 受け口が読む本文の上限 */
+    /** 受け口が読む本文の上限（PostToolUse は道具の結果を含むので大きめ） */
     maxBodyBytes: 64 * 1024,
+    maxPostToolBodyBytes: 2 * 1024 * 1024,
+    /** ai-research の道具の名前（claude.ai のコネクタは面によって接頭辞が違う） */
+    connectorToolPattern: "^mcp__.*ai-?research.*__",
+    /** 遅延読み込みの道具を探す道具 */
+    toolSearchTools: ["ToolSearch"],
+    /** ツール検索で ai-research が見つからなかった会話を覚えておく時間 */
+    noConnectorTtlMs: 60 * 60_000,
   },
 } as const;
 
@@ -102,12 +109,14 @@ URL を読む：
   async () => research.start({ question: "解釈した問い", queries: [], urls: ["https://…"] })
 
 ai-research で取れなかった URL（cutoffs の blocked / timeout / error / unsupported）は、このあと WebFetch で読めます。結果には「経路外（ai-research で取れなかった）」と書いてください。
+ツール検索で ai-research が見つからないときは、このあと組み込みのウェブ検索・取得を使えます。結果には「経路外（ai-research が使えない）」と書いてください。
 利用者がウェブ検索を明示したときだけ、組み込みのウェブ検索を使えます。`;
 
 /** 通すときにモデルへ添える文（Q-07） */
 export const ROUTE_ALLOW_CONTEXT = {
   explicit: "利用者がウェブ検索を明示したので、組み込みの道具で調べます。結果には「経路外（利用者の指定）」と書き、確認済の印は付けないでください。",
   cutoff: "ai-research で取れなかった URL なので、組み込みの取得で読みます。結果には「経路外（ai-research で取れなかった）」と書き、確認済の印は付けないでください。",
+  noConnector: "この会話では ai-research の道具が見つからなかったので、組み込みの道具で調べます。結果には「経路外（ai-research が使えない）」と書き、確認済の印は付けないでください。",
 } as const;
 
 export function hostPolicy(host: string): HostPolicy {
