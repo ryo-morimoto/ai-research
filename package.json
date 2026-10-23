@@ -1,0 +1,19 @@
+{
+  "name": "ai-research",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint:deps": "node scripts/check-deps.mjs",
+    "spec:check": "node scripts/check-specs.mjs",
+    "check": "pnpm lint:deps && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

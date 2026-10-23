@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+coverage/
+_apalache-out/
+specs/out/
+bench/results/
+.DS_Store
