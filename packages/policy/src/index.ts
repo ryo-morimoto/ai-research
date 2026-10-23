@@ -146,16 +146,16 @@ export function isPreferred(host: string): boolean {
  * 道具の説明文（MCP サーバーの instructions と code 道具の説明）。
  * どのアプリ・機械から呼んでも同じ手順になるよう、ここで1つに決める（Q-05、Q-06）。
  */
-export const INSTRUCTIONS = `
-ai-research は利用者専用の調査の道具です。ウェブ検索（web_search / WebSearch）とページの取得（web_fetch / WebFetch）の代わりに、この道具の code を使ってください。利用者がそう決めています。
+/**
+ * 説明は内容ごとに1か所（設計 v1.3 D11）。
+ *   いつ使うか        → スキル ai-research-first の説明文（plugins/ai-research）
+ *   手順・API・書き方 → CODE_TOOL_DESCRIPTION（ここ）
+ *   経路外の書き方    → ROUTE_DENY_REASON / ROUTE_ALLOW_CONTEXT（フックがその場で返す）
+ * サーバーの説明文は、code の道具を指すだけにする。大きさは test/budget.test.ts で上限を守る。
+ */
+export const INSTRUCTIONS = `ai-research は利用者専用の調査の道具（出典つきの台帳つき）です。調べものには code の道具を使い、手順と API はその説明文に従ってください。`;
 
-## いつ使うか
-- 頼まれていなくても、答えに外の事実が要るとき（今の状態・数値・仕様・料金・規約・論文・ライブラリやサービスの挙動・ニュース）は、ウェブ検索ではなく ai-research を使う。
-- 利用者が URL を示したときも、web_fetch ではなく research.start の urls に渡す。
-- 道具が遅延読み込みになっていて中身が見えないときは、先に ai-research の code を読み込んでから使う。
-- 使わなくてよいとき：知識だけで答えられる安定した事柄（定義・歴史・一般的な仕組み）、利用者のファイルや接続済みのアプリの中身を見るとき。
-- ウェブ検索に戻してよいとき：利用者が明示的にウェブ検索を求めたとき、ai-research が使えないとき（エラー、検索が not_configured、必要な出典が cutoffs で取れないとき）。戻したことは結果に書く。
-
+const PROCEDURE = `
 ## 標準の手順（最初の結果までは3ターン）
 1. 依頼を「解釈した問い」に書き直す。会話を参照しないと意味が決まらない依頼は、会話から補って自立した問いにする。
    検索語を3〜5個決めて、research.start を呼ぶ。
@@ -189,7 +189,7 @@ async () => {
 \`\`\`
 `.trim();
 
-export const CODE_TOOL_DESCRIPTION = `${INSTRUCTIONS}
+export const CODE_TOOL_DESCRIPTION = `${PROCEDURE}
 
 ## 使える API（TypeScript）
 \`\`\`ts

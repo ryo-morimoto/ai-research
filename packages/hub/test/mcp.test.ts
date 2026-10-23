@@ -33,7 +33,8 @@ describe("MCP（道具の面）", () => {
     const r = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } });
     expect(r.status).toBe(200);
     expect(r.body!.result.serverInfo.name).toBe("ai-research");
-    expect(r.body!.result.instructions).toContain("research.start");
+    // サーバーの説明文は code の道具を指すだけ（手順は道具の説明文に1か所）
+    expect(r.body!.result.instructions).toContain("code の道具");
   });
 
   it("tools/list：code と台帳の3つ", async () => {

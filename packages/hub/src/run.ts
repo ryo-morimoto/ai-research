@@ -305,7 +305,6 @@ export class RunDO extends DurableObject<Env> {
         fingerprint: doc.fingerprint,
         verifiedAt: new Date().toISOString(),
       });
-      this.addDoc(v, doc);
       if (r.ok) {
         hit.verifiedText = `${r.excerpt.ctxBefore}${r.excerpt.excerpt}${r.excerpt.ctxAfter}`;
         hit.fingerprint = doc.fingerprint;
@@ -346,10 +345,7 @@ export class RunDO extends DurableObject<Env> {
         status: 200,
         textHash: doc.fingerprint.textHash,
       });
-      if (j === "unchanged") {
-        this.addDoc(v, doc);
-        return markUnchanged(doc.fingerprint);
-      }
+      if (j === "unchanged") return markUnchanged(doc.fingerprint);
     }
     recheckWith(doc);
   }

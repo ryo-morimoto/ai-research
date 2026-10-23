@@ -232,6 +232,24 @@ describe("調査の実行（RunDO）", () => {
     expect(v3.statuses[0]!.status).toBe("未確認");
   });
 
+  it("照らし直しのために取り直した文書は、段落の候補にしない（設計 v1.3 §8.1.4）", async () => {
+    const a = newRun();
+    const b = await a.stub.start(a.id, { question: "取得先の制限", queries: ["limits"] });
+    const p = passageWith(b, "3秒に1回")!;
+    await a.stub.verify([{ text: "x", cite: [{ passageId: p.passageId, quote: "同時接続1本までとする" }] }]);
+    // 出典が変わった（ETag が変わり、抜き書きは残っている。問いに合う文も増えた）
+    await upstreamSet({
+      url: "https://docs.example.com/limits",
+      contentType: "text/html",
+      etag: '"limits-v3"',
+      body: "<article><p>arXiv の API は3秒に1回、同時接続1本までとする。</p><p>同時接続1本までとする制限は、2026年に見直す予定である。</p></article>",
+    });
+    const c = newRun();
+    const b2 = await c.stub.start(c.id, { question: "同時接続1本までとする", queries: [] });
+    expect(b2.ledgerHits[0]).toMatchObject({ status: "確認済" });
+    expect(b2.passages).toEqual([]);
+  });
+
   it("INV-4：実行の途中で台帳に増えたものは、その実行の検索に出ない（snapshot）", async () => {
     const a = newRun();
     await a.stub.start(a.id, { question: "取得先の制限", queries: [] });
