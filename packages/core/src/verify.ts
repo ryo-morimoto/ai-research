@@ -51,7 +51,7 @@ export function matchQuote(quote: string, sourceText: string, opts: MatchOptions
   const idx = src.indexOf(q);
   if (idx >= 0) return { ok: true, kind: "exact", start: idx, end: idx + q.length, score: 1 };
 
-  // 2. 前後の文脈で位置を特定し、記号・空白・幅の違いだけを許す
+  // 2. 前後の文脈で位置を特定し、記号・空白・幅の違いだけを許す（数字と否定の違いは許さない）
   const byCtx = locateByContext(q, src, opts.ctxBefore, opts.ctxAfter);
   if (byCtx) return { ok: true, kind: "context", ...byCtx, score: 1 };
 
@@ -88,6 +88,10 @@ function locateByContext(
     const start = starts[li];
     const end = ends[li + target.length - 1];
     if (start === undefined || end === undefined) break;
+    if (!sameMeaningMarkers(q, src.slice(start, end))) {
+      from = li + 1;
+      continue;
+    }
     const score =
       commonSuffixLength(src.slice(Math.max(0, start - before.length), start), before) +
       commonPrefixLength(src.slice(end, end + after.length), after);
@@ -129,6 +133,8 @@ function fuzzyLocate(q: string, src: string): { start: number; end: number; scor
         for (const len of [q.length - 2, q.length - 1, q.length, q.length + 1, q.length + 2]) {
           if (len <= 0 || start + len > src.length) continue;
           const span = src.slice(start, start + len);
+          // 数字や否定の違いは「表記差」ではなく意味の違い。あいまい一致でも許さない
+          if (!sameMeaningMarkers(q, span)) continue;
           const score = similarity(q, span);
           if (!best || score > best.score) best = { start, end: start + len, score };
         }
@@ -138,6 +144,25 @@ function fuzzyLocate(q: string, src: string): { start: number; end: number; scor
     }
   }
   return best;
+}
+
+// 数の表記：符号・小数点・百分率は意味を持つ。桁区切りのカンマだけは表記差として扱う
+const NUMBER = /[-−]?\d+(?:[.,]\d+)*%?/gu;
+const numbers = (s: string): string[] => (s.match(NUMBER) ?? []).map((x) => x.replace(/(?<=\d),(?=\d{3}(?!\d))/gu, "").replace("−", "-"));
+const NEGATION = /ない|ません|なし|ぬ|ず|不|非|無|未|\bnot\b|\bno\b|\bnever\b|n't|\bwithout\b/giu;
+
+/**
+ * あいまい一致で許す差の範囲を、意味の変わらない表記差に限る。
+ * 数字の並びと否定の語の並びが同じでなければ、同じ文とは見なさない
+ * （事前の知識で数字を書き換えた引用を「表記差あり」で通さない。Q-06）。
+ */
+export function sameMeaningMarkers(a: string, b: string): boolean {
+  const da = numbers(a);
+  const db = numbers(b);
+  if (da.length !== db.length || da.some((x, i) => x !== db[i])) return false;
+  const na = (a.match(NEGATION) ?? []).map((x) => x.toLowerCase());
+  const nb = (b.match(NEGATION) ?? []).map((x) => x.toLowerCase());
+  return na.length === nb.length && na.every((x, i) => x === nb[i]);
 }
 
 /** 1 - 編集距離 / max(長さ) */

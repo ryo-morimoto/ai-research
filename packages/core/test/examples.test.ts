@@ -36,8 +36,11 @@ describe("matchQuote の3段", () => {
     expect(m.ok && m.kind).toBe("context");
   });
   it("少しの書き換えは fuzzy", () => {
-    const m = matchQuote("名前ごとに世界で一つだけ動くインスタンスです", src);
+    const m = matchQuote("名前ごとに世界で1つだけ動くインスタンスだ", src);
     expect(m.ok && m.kind).toBe("fuzzy");
+  });
+  it("漢数字と算用数字の違いは、安全側に倒して通さない", () => {
+    expect(matchQuote("名前ごとに世界で一つだけ動くインスタンスです", src).ok).toBe(false);
   });
   it("原文にない文は失敗", () => {
     const m = matchQuote("サーバーを複数台に分散して動かす", src);
@@ -146,5 +149,20 @@ describe("予算", () => {
     const next = advance(a.state, "continue");
     expect(next.stopped).toBe(false);
     st = { ...next, phase: "first" } as typeof st;
+  });
+});
+
+describe("上書きの防止（Q-06）：数字・否定を書き換えた引用は通さない", () => {
+  const src = "arXiv の API は3秒に1回、同時接続1本までとする。料金は1.5倍になる。キャッシュは効かない。";
+  it.each([
+    ["数字の書き換え", "arXiv の API は1秒に10回、同時接続1本までとする"],
+    ["小数点の削除", "料金は15倍になる"],
+    ["否定の削除", "キャッシュは効く"],
+  ])("%s", (_name, quote) => {
+    expect(matchQuote(quote, src).ok).toBe(false);
+  });
+  it("記号・空白・桁区切りの違いは表記差として通す", () => {
+    expect(matchQuote("arXiv の API は 3 秒に 1 回 同時接続 1 本までとする", src)).toMatchObject({ ok: true, kind: "context" });
+    expect(matchQuote("上限は1000件", "上限は1,000件。")).toMatchObject({ ok: true });
   });
 });

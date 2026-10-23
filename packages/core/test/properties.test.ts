@@ -7,6 +7,7 @@ import {
   normalize,
   matchQuote,
   verifyQuote,
+  sameMeaningMarkers,
   selectPassages,
   splitParagraphs,
   admit,
@@ -223,5 +224,37 @@ describe("P9 抜き書きと文脈の長さは上限以内（E-01）", () => {
       }),
       params,
     );
+  });
+});
+
+describe("P10 表記差として許すのは意味の変わらない差だけ（Q-06：上書きの防止）", () => {
+  const word = fc.string({ unit: fc.constantFrom(..."あいうえおかきくけこ調査出典確認台帳原文abcdefgh、。 "), minLength: 12, maxLength: 40 });
+  it("数字を1つ書き換えた引用は、原文に同じ数字の並びがない限り照合に通らない", () => {
+    fc.assert(
+      fc.property(word, fc.integer({ min: 0, max: 999_999 }), word, fc.nat(), fc.integer({ min: 1, max: 9 }), (pre, num, post, k, delta) => {
+        const src = `${pre}${num}${post}`;
+        const n = normalize(src);
+        const ns = String(num);
+        const at = n.indexOf(ns);
+        if (at < 0) return true;
+        const quote0 = n.slice(Math.max(0, at - 10), at + ns.length + 10);
+        const i = quote0.indexOf(ns) + (k % ns.length);
+        const changed = String((Number(quote0[i]) + delta) % 10);
+        const quote = quote0.slice(0, i) + changed + quote0.slice(i + 1);
+        const r = verifyQuote({ quote, sourceText: src, source, fingerprint: {}, verifiedAt: "t" });
+        if (!r.ok) return true;
+        // 照合器の実装とは別に、数字の並びを素朴に比べる（試験の神託を実装に依存させない）
+        const digits = (x: string) => (x.match(/\d+/g) ?? []).join(",");
+        return digits(normalize(quote)) === digits(r.excerpt.excerpt);
+      }),
+      params,
+    );
+  });
+  it("sameMeaningMarkers：桁区切りは同じ、小数点・符号・否定の違いは別", () => {
+    expect(sameMeaningMarkers("1,000件", "1000件")).toBe(true);
+    expect(sameMeaningMarkers("1.5倍", "15倍")).toBe(false);
+    expect(sameMeaningMarkers("-5度", "5度")).toBe(false);
+    expect(sameMeaningMarkers("効かない", "効く")).toBe(false);
+    expect(sameMeaningMarkers("it does not work", "it does work")).toBe(false);
   });
 });

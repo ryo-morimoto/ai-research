@@ -5,6 +5,7 @@ export {
   reverifyRecord,
   statusLabel,
   similarity,
+  sameMeaningMarkers,
   type VerifiedExcerpt,
   type MatchKind,
   type MatchResult,
