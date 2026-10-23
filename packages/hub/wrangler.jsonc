@@ -17,7 +17,7 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerDO", "RunDO", "HostLimiterDO"] }],
   "worker_loaders": [{ "binding": "LOADER" }],
   // OAuth の状態。KV 名前空間を cf で作り、id を差し替える（docs/04 §2.2）
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "cb6814a41b7c4530a5c75078f3279159" }],
   "vars": {
     "SEARCH_PROVIDER": "brave"
   },

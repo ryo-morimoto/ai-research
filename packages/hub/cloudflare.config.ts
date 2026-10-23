@@ -31,7 +31,7 @@ export default defineConfig({
 			BRAVE_API_KEY: bindings.secret(),
 			// OAuth の状態（cf kv namespaces create --title ai-research-oauth で作った名前空間）
 			OAUTH_KV: bindings.kv({
-				id: "REPLACE_WITH_OAUTH_KV_ID",
+				id: "cb6814a41b7c4530a5c75078f3279159",
 			}),
 			LEDGER: bindings.durableObject({
 				worker: "ai-research",
