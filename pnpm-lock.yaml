@@ -66,6 +66,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261023.1
         version: 5.20261023.1
+      cf:
+        specifier: 1.0.0-beta.21
+        version: 1.0.0-beta.21(@types/node@22.20.5)
       fast-check:
         specifier: 4.10.2
         version: 4.10.2
@@ -223,6 +226,9 @@ packages:
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
 
+  '@cloudflare/build-output-utils@0.9.4':
+    resolution: {integrity: sha512-5rVdn81HEP2Uugs/wSfXu5XbadaZQkgKZl1xwkKb3kgatSOpTH2vszBXWTRh4IlE1vHnc3LwHcnc2O4TcXVbuQ==}
+
   '@cloudflare/codemode@0.5.5':
     resolution: {integrity: sha512-MQMOisCSXpXO0+cHBRshK2mzzEx3lnm6jk/R8MS3G1BmKnrmaSf7HxNBh058ZGBVzp++DJmWOqaCUJjVTCZJKA==}
     peerDependencies:
@@ -240,9 +246,15 @@ packages:
       zod:
         optional: true
 
+  '@cloudflare/config@0.28.0':
+    resolution: {integrity: sha512-2SaZn5rzNSxAR5VQYIlMm8+zHj2EGfLbaN+abYiPXDI42IFRCHSENpDxjAQpLj2NZnUVszHY4h6T1XljwHk5eQ==}
+
   '@cloudflare/kv-asset-handler@0.5.0':
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
     engines: {node: '>=22.0.0'}
+
+  '@cloudflare/runtime-types@0.1.15':
+    resolution: {integrity: sha512-E8WCMGir4IRp/ksqodMWGpxHJvgtfgW9lbVM5mNAdWrnonMNOtGocyxVt6hG8/RGW9sjFWR7F7Cp3SCF1Cz6zg==}
 
   '@cloudflare/unenv-preset@2.16.2':
     resolution: {integrity: sha512-JBP1+Z7ZSNG/d4mRP+y8VC5dka3tZVMLEZRvS+rzQ4DGV1EoxRFQckcJTTkXbHSQiTj0DtNI01Zwb/V2fX0mvQ==}
@@ -1063,6 +1075,11 @@ packages:
 
   capnweb@0.12.0:
     resolution: {integrity: sha512-jgZ/LMtMVTi+RVlooIslH78Gg23XbDTdvcLghWx3oz17D6u5GuJARt+uhZk/wcTo+f81eeabfnow4d3zLBj+JQ==}
+
+  cf@1.0.0-beta.21:
+    resolution: {integrity: sha512-rJqfa8zW7pN0m/fmc11xT3GzcXrqwhtZ9pizO3LZyZJjoOPR+h/us/+ajK0tXPhL+jHqaW/39ODQ481GDUyziQ==}
+    engines: {node: ^22.23.0 || ^24.22.0 || ^26.12.0}
+    hasBin: true
 
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
@@ -2189,6 +2206,10 @@ snapshots:
 
   '@cfworker/json-schema@4.1.1': {}
 
+  '@cloudflare/build-output-utils@0.9.4':
+    dependencies:
+      '@cloudflare/config': 0.28.0
+
   '@cloudflare/codemode@0.5.5(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.7))(zod@4.6.7)':
     dependencies:
       '@types/json-schema': 7.0.15
@@ -2197,7 +2218,20 @@ snapshots:
       '@modelcontextprotocol/sdk': 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.7)
       zod: 4.6.7
 
+  '@cloudflare/config@0.28.0':
+    dependencies:
+      zod: 4.6.5
+
   '@cloudflare/kv-asset-handler@0.5.0': {}
+
+  '@cloudflare/runtime-types@0.1.15(@types/node@22.20.5)':
+    dependencies:
+      miniflare: 5.20261019.2-beta(@types/node@22.20.5)
+      workerd: 1.20261019.1
+    transitivePeerDependencies:
+      - '@types/node'
+      - bufferutil
+      - utf-8-validate
 
   '@cloudflare/unenv-preset@2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261019.1)':
     dependencies:
@@ -2850,6 +2884,18 @@ snapshots:
   caniuse-lite@1.0.30001819: {}
 
   capnweb@0.12.0: {}
+
+  cf@1.0.0-beta.21(@types/node@22.20.5):
+    dependencies:
+      '@cloudflare/build-output-utils': 0.9.4
+      '@cloudflare/config': 0.28.0
+      '@cloudflare/runtime-types': 0.1.15(@types/node@22.20.5)
+      blake3-wasm: 2.1.5
+      miniflare: 5.20261019.2-beta(@types/node@22.20.5)
+    transitivePeerDependencies:
+      - '@types/node'
+      - bufferutil
+      - utf-8-validate
 
   chai@6.3.0: {}
 
