@@ -114,19 +114,19 @@ research.start(q: {
   exclusions?: string[];
   queries: string[];         // 検索語（3〜5個）
   depth?: "first" | "standard";   // standard は最初の結果＋続き（合計4分まで）
+  urls?: string[];           // 利用者が示した URL（検索せずに直接読む）
 }): Promise<Bundle>;
 
 research.next(runId: string, opts?: { waitMs?: number }): Promise<Bundle>;   // 差分だけ
-research.verify(runId: string, claims: { text: string; cite: string[] }[]): Promise<ClaimStatus[]>;
-research.steer(runId: string, q: { question: string; queries: string[] }): Promise<Bundle>;
+// cite の quote は、引いた段落からの原文どおりの引用。照合は quote と段落の原文で行う（主張の文は使わない）
+research.verify(runId: string, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<VerifyResult>;
+research.steer(runId: string, q: { question: string; queries: string[]; urls?: string[] }): Promise<Bundle>;
 research.deepen(runId: string): Promise<Bundle>;   // 利用者が求めたときだけ（W-04）
 
-// 台帳
+// 台帳（実行環境からは検索だけ。取り消しと書き出しは MCP の道具 ledger_forget / ledger_export）
 ledger.search(text: string): Promise<LedgerHit[]>;
-ledger.forget(target: { recordId?: string; sourceUrl?: string }): Promise<void>;
-ledger.export(): Promise<string>;   // JSONL
 
-// 個別の道具（標準手順で足りないときだけ）
+// 個別の道具（標準手順で足りないときだけ）。実装 v0.1 では未実装（M2）
 web.search(query: string): Promise<SearchHit[]>;
 web.fetch(url: string, opts?: { selectFor?: string }): Promise<Passage[]>;
 github.file(repo: string, path: string, ref?: string): Promise<Passage[]>;
@@ -162,7 +162,7 @@ return await research.start({
 
 // 2ターン目：束の段落だけを根拠に主張を書き、照合する。届いていた差分も受け取る
 const statuses = await research.verify(runId, [
-  { text: "…", cite: ["p3", "p7"] },
+  { text: "…", cite: [{ passageId: "p3", quote: "…原文どおりの一節…" }, { passageId: "p7", quote: "…" }] },
 ]);
 const more = await research.next(runId, { waitMs: 0 });
 return { statuses, more };

@@ -102,6 +102,14 @@ describe("OAuth", () => {
     expect(((await meta.json()) as { resource: string }).resource).toBe("https://hub.test/mcp");
   });
 
+  it("認可サーバーのメタデータ：CIMD と DCR の両方を受け付け、PKCE は S256", async () => {
+    const r = await SELF.fetch("https://hub.test/.well-known/oauth-authorization-server");
+    const m = (await r.json()) as Record<string, unknown>;
+    expect(m.client_id_metadata_document_supported).toBe(true);
+    expect(m.registration_endpoint).toBe("https://hub.test/oauth/register");
+    expect(m.code_challenge_methods_supported).toContain("S256");
+  });
+
   it("合言葉が違えば許可しない。正しければトークンが出て /mcp を使える", async () => {
     const redirect = "https://claude.ai/api/mcp/auth_callback";
     const reg = await SELF.fetch("https://hub.test/oauth/register", {

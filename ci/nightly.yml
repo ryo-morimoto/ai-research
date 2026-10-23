@@ -1,0 +1,39 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 18 * * *" # 03:17 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: pnpm install --frozen-lockfile
+      # 性質ベーステストを多めに回す。失敗したら出力の seed で再現できる（FC_SEED）
+      - name: Property tests (many runs)
+        run: pnpm --filter @ai-research/core test
+        env:
+          FC_RUNS: "20000"
+      - run: pnpm --filter @ai-research/hub test
+      # Apalache による上限付きのモデル検査を加える
+      - name: Formal specs (simulation + Apalache)
+        run: pnpm spec:check
+        env:
+          SPEC_MODE: full
+          SPEC_SAMPLES: "20000"
+          SPEC_STEPS: "10"

@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 依存の規則（INV-1 の型の抜け道を塞ぐ）→ 型 → 単体・性質・結合の試験
+      - run: pnpm check
+      # 形式仕様：正しい版は通り、わざと壊した版は違反が見つかること（シミュレーションのみ）
+      - run: pnpm spec:check
+      - name: Build the Worker bundle
+        run: pnpm --filter @ai-research/hub exec wrangler deploy --dry-run --outdir dist

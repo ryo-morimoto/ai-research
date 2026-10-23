@@ -43,6 +43,8 @@ function providerFor(origin: string): OAuthProvider<Env> {
       authorizeEndpoint: "/authorize",
       tokenEndpoint: "/oauth/token",
       clientRegistrationEndpoint: "/oauth/register",
+      // claude.ai の既定（Claude's published identity）は CIMD。DCR は互換のために残す
+      clientIdMetadataDocumentEnabled: true,
       scopesSupported: ["mcp"],
       resourceMetadata: { resource: `${origin}/mcp`, authorization_servers: [origin], resource_name: "ai-research" },
     });

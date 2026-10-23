@@ -3,7 +3,10 @@
   "name": "ai-research",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public：外への fetch を公開のインターネットだけに限る。
+  // OAuth の Client ID Metadata Document（claude.ai の「Claude's published identity」）の取得に必要で、
+  // 取得の出口の SSRF 対策にもなる
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "durable_objects": {
     "bindings": [
       { "name": "LEDGER", "class_name": "LedgerDO" },

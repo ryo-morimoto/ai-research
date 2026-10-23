@@ -96,13 +96,13 @@ ai-research/
   packages/
     core/          純粋な関数：正規化、照合、段落選び、変わりやすさの規則、予算の計算、トークンの見積もり
                    Workers に依存しない。性質ベーステストの主な対象
-    hub/           Worker：MCP の入口、RunDO、LedgerDO、HostLimiterDO、ConfigDO、取得の出口
+    hub/           Worker：MCP の入口、OAuth、RunDO、LedgerDO、HostLimiterDO、取得の出口
+                   test/ に workerd 上の結合試験（偽の取得先、実行記録の検査）
     sandbox-api/   code mode でモデルに見せる型、実行環境への受け渡し
     policy/        版つきのデータ：取得先ごとの制限表、変わりやすさの規則、常設の方針、上限値、道具の説明文
-  specs/           Quint の仕様（ledger.qnt, run.qnt, limiter.qnt）と、実装のログを仕様の手順に変換する道具
-  test/
-    unit/  property/  model/  integration/  fault/  security/
-  bench/           試験用の依頼セット、呼び出し器、計測の集計
+  specs/           Quint の仕様（ledger.qnt, run.qnt, limiter.qnt）。正しい版と、わざと壊した版
+  scripts/         依存の規則の検査（check-deps）、仕様の検査（check-specs）
+  bench/           試験用の依頼セット、呼び出し器、計測の集計（M3）
 ```
 
 依存の規則（lint で強制する）：
@@ -221,9 +221,9 @@ policy:   { minIntervalMs, maxConcurrent, leaseTtlMs }
 state:    { lastGrantAt, leases: [{ leaseId, grantedAt, expiresAt }] }
 ```
 
-#### 2.4.4 ConfigDO
+#### 2.4.4 手順の版（ConfigDO はやめた）
 
-現行の `procedure_version`（policy パッケージの内容ハッシュ）と、その中身。
+`procedure_version` は、policy パッケージの内容（revision、取得先の表、上限、説明文）のハッシュを実行時に計算する（`policy.procedureVersion()`）。policy はデプロイに含まれるので、版を保存する DO は要らない。実行記録（manifest）に毎回書く。
 
 ### 2.5 状態の移り変わり
 
@@ -271,8 +271,18 @@ stateDiagram-v2
 
 1. **完全一致**：`N(引用)` が `N(原文)` の部分文字列 → 確認済
 2. **前後の文脈で位置を特定**：W3C の Web Annotation の TextQuoteSelector と同じ考え方で、前後の文脈（prefix / suffix）から位置を決める [10]。記号・幅の違いだけを許す → 確認済（表記差あり）
-3. **あいまい一致**：類似度が閾値以上 → 確認済（表記差あり）。閾値は【要計測】
+3. **あいまい一致**：類似度が閾値以上 → 確認済（表記差あり）。閾値は 0.9（【要計測】のまま）
 4. どれでもない → 未確認
+
+2と3には、**意味の目印が同じこと**という条件を付ける（`sameMeaningMarkers`）。
+
+- 数の並びが同じ。符号・小数点・百分率は意味を持つ。桁区切りのカンマだけは表記差として扱う（`1,000` と `1000` は同じ、`1.5` と `15` は別）。
+- 否定の語（ない、ず、不、非、無、未、not、no、never など）の並びが同じ。
+- 漢数字と算用数字の違い（`一つ` と `1つ`）は、安全側に倒して通さない。
+
+これは結合試験の上書きの試験（Q-06）で見つかった穴をふさぐもの。事前の知識で数字を書き換えた引用（原文「3秒に1回」に対して「1秒に10回」）が、あいまい一致で「確認済（表記差あり）」になっていた。台帳に入る抜き書きは原文側の文字列なので台帳は汚れないが、主張には確認済の印が付いてしまう。
+
+引用は、**引いた段落の中でだけ**照合する（同じ文書の別の段落の文を、その段落の名で通さない）。照らし直しで確認済になった台帳の候補は、その抜き書きと前後の文脈の中で照合する。
 
 台帳に書く抜き書きは、**照合で位置が決まった原文側の文字列そのもの**から切り出す。主張の文や引用の文は使わない。
 
@@ -421,6 +431,7 @@ module run {
 | P7 | 変わりやすさは、会話の側の値を入れても規則の値より下がらない | Q-02 |
 | P8 | トークンの見積もりは、試料文での実測値を下回らない（上限側に倒す） | R-01 |
 | P9 | 抜き書きと文脈の長さは常に上限以内 | E-01 |
+| P10 | 照合に通った引用と抜き書きは、数の並びが同じ（数字を1つ書き換えた引用は、原文に同じ数の並びがない限り通らない） | Q-06 |
 
 ### 3.3 仕様と実装をつなぐ試験
 
@@ -542,15 +553,29 @@ module run {
 
 ## 4. Known Unknowns
 
+実装 v0.1 で確かめた結果を「状態」に書いた。
+
 | 項目 | 状態 | 決め方 |
 |---|---|---|
-| Quint の仕様をトレース検証に使えるか | 論文の道具は TLA+ と TLC が前提 [1]。Quint の仕様を TLA+ に変換して使えるかは未確認 | M1 の前に小さな仕様で試す。だめならトレース検証の対象だけ TLA+ で書く |
-| Apalache・TLC で、`run.qnt` の拍12・版2の大きさが現実的な時間で終わるか | 不明 | 先に小さくして測り、CI の時間上限に合わせて大きさを決める |
-| Dynamic Workers の1回あたりの上限（CPU・メモリ）と、Vitest 統合で code mode の実行環境まで試せるか | 不明（オープンベータで、公開されているのは月ごとの無料枠と料金だけ）[9] | 一次資料を読み、M0 で試す |
+| Quint の仕様をトレース検証に使えるか | 一部確認。`quint compile --target tlaplus` で TLA+ に変換できた。結合試験では、RunDO の実行記録を `run.qnt` の不変条件（INV-8〜11）に照らす検査を TypeScript で書いた（`packages/hub/test/trace.ts`）。TLC での照合は未着手 | M2 で、実行記録を TLA+ の手順の列に変換して TLC で照らす |
+| Apalache・TLC で、`run.qnt` の拍12・版2の大きさが現実的な時間で終わるか | 不明 | 先に小さくして測り、CI の時間上限に合わせて大きさを決める（夜間の CI は手数10） |
+| Dynamic Workers の1回あたりの上限（CPU・メモリ）と、Vitest 統合で code mode の実行環境まで試せるか | 一部確認。Vitest 統合（`@cloudflare/vitest-plugin`）で Worker Loader が動き、code の道具から `research.*` を呼ぶ試験と、実行環境から外へ通信できない試験（INV-12）が通った。Dynamic Workers は Workers Paid でだけ使える [11]。1回あたりの上限は未確認 | 一次資料を読み、試験運用で測る |
 | 日本語のトークン数の見積もり係数 | 不明 | 試料文で実測する（P8） |
-| Durable Object の SQLite で trigram の全文検索が使えるか | 不明 | M1 の前に試す |
-| 会話の Claude の振る舞いを含む試験（注入試験、上書き試験）を、どこまで自動化できるか | 呼び出し器（`claude -p`）で半自動にする想定 | M3 で試す。スマートフォンは手動 |
-| あいまい一致の閾値 | 不明 | 書き換えた試験ページで誤判定率を測る |
+| Durable Object の SQLite で trigram の全文検索が使えるか | **確認済**。workerd（Vitest 統合）で `tokenize='trigram'` の FTS5 が作れ、3文字以上の語で引けた。2文字以下は LIKE に落とす | 本番でも起動時に確かめ、使えなければ LIKE に落ちる（`hasFts`） |
+| Readability（linkedom の上）が workerd で動くか | **確認済**。本文の抽出の試験が通った | — |
+| claude.ai のカスタムコネクタの OAuth | 一部確認。claude.ai の既定は「Claude's published identity」[12]。これは Client ID Metadata Document（CIMD）と見られるので、CIMD を有効にした（`global_fetch_strictly_public` が要る）。DCR も残した。登録から合言葉の同意、トークン、`/mcp` までの流れは試験で通った。claude.ai からの実際の接続は未確認 | デプロイして確かめる（docs/04） |
+| 会話の Claude の振る舞いを含む試験（注入試験、上書き試験）を、どこまで自動化できるか | ハブの側（照合・台帳）は結合試験にした。会話の Claude を含む試験は未着手 | M3 で、呼び出し器（`claude -p`）で半自動にする。スマートフォンは手動 |
+| あいまい一致の閾値 | 0.9 のまま。数字・否定の違いは閾値によらず通さないようにした（§2.6.2） | 書き換えた試験ページで誤判定率を測る |
+
+### 4.1 結合試験で見つかったこと
+
+| 見つかったこと | 対応 |
+|---|---|
+| 数字を書き換えた引用が、あいまい一致で「確認済（表記差あり）」になる（Q-06 の穴） | 意味の目印の条件を加えた（§2.6.2）。性質 P10 を加え、条件を外すと P10 が失敗することを確かめた |
+| 引用の照合が文書全体で行われ、引いた段落にない文でも通る | 引いた段落の中でだけ照合するようにした |
+| 方向を変えても、古い版の取得は止まらずに走り続ける（結果は混ぜないが、頻度制限の枠を使う） | 作業ごとの中止の合図を取得の出口まで渡すようにした |
+| 試験で時間を縮めると、頻度制限の開始時刻の割り当てが実時間とずれて詰まる | HostLimiterDO の中の時刻をすべて実時間にし、方針の間隔を同じ割合で縮めるようにした |
+| 試験が誤りを見逃さないか | INV-8（打ち切りを束に入れない）と INV-10（古い版の段落を混ぜる）をわざと壊して、結合試験が失敗することを確かめた。古い版の作業の結果を捨てる処理だけを壊した場合は、束を作るときの絞り込みが二重に守るので失敗しない（意図どおり） |
 
 ---
 
@@ -566,3 +591,5 @@ module run {
 8. Cloudflare Docs「Code Mode」https://developers.cloudflare.com/agents/api-reference/codemode
 9. Cloudflare Changelog「Dynamic Workers, now in open beta」https://developers.cloudflare.com/changelog/post/2026-03-24-dynamic-workers-open-beta/
 10. W3C「Web Annotation Data Model」（TextQuoteSelector）https://www.w3.org/TR/annotation-model/
+11. Cloudflare Docs「Dynamic Workers: Pricing」https://developers.cloudflare.com/dynamic-workers/pricing
+12. Claude Help Center「Get started with custom connectors using remote MCP」https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp
