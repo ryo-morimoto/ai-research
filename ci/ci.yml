@@ -24,5 +24,9 @@ jobs:
       - run: pnpm check
       # 形式仕様：正しい版は通り、わざと壊した版は違反が見つかること（シミュレーションのみ）
       - run: pnpm spec:check
+      # cf（Cloudflare CLI）で束ねて検証する。API を呼ばず、資格情報も要らない
       - name: Build the Worker bundle
-        run: pnpm --filter @ai-research/hub exec wrangler deploy --dry-run --outdir dist
+        working-directory: packages/hub
+        run: |
+          pnpm exec cf build
+          pnpm exec cf deploy --prebuilt --dry-run

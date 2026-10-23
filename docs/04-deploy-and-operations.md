@@ -1,6 +1,6 @@
 # ai-research：デプロイと運用
 
-版 0.2（実装 v0.1 に対応。デプロイを Cloudflare CLI `cf` に替えた）
+版 0.3（実装 v0.1 に対応。Cloudflare CLI `cf` でデプロイし、動作を確かめた）
 
 この文書は、ハブを自分の Cloudflare アカウントに置き、claude.ai から使えるようにするまでの手順と、日々の運用をまとめる。設計は docs/02、詳細設計と検証は docs/03 を見る。
 
@@ -11,97 +11,73 @@
 | 項目 | 内容 |
 |---|---|
 | Cloudflare | **Workers Paid** プラン。code mode の実行環境（Dynamic Workers / Worker Loader）は Workers Paid でだけ使える [1] |
-| 手元の道具 | Node.js 22 以上、pnpm 10（`corepack enable` で入る）、Cloudflare CLI `cf`（ベータ）[3] |
+| 手元の道具 | Node.js 22 以上、pnpm 10（`corepack enable` で入る）。Cloudflare CLI `cf`（ベータ）[3] は hub の devDependency に入っている |
 | claude.ai | カスタムコネクタが使えるプラン（Free は1つまで）[2] |
 | 検索 | Brave Search API か Tavily の API キー（どちらか1つ）。なければ検索なしで動く（URL を直接渡す使い方と、台帳の検索だけ） |
 | GitHub | 任意。トークンがあると GitHub API の頻度制限が緩くなる |
 
 ### 1.1 `cf` と Wrangler の使い分け
 
-デプロイと資源の操作は `cf` で行う。ただし `cf` はベータで、次の3つの理由から Wrangler の設定（`wrangler.jsonc`）も残す。
+デプロイと資源の操作は `cf` で行う。ただし `cf` はベータで、次の理由から Wrangler の設定（`wrangler.jsonc`）も残す。
 
 | 理由 | 出典 |
 |---|---|
 | `cf dev`・`cf build`・`cf deploy` は `cloudflare.config.ts` だけを読む。Wrangler は `cloudflare.config.ts` を読まない | [4] |
 | 結合試験（`@cloudflare/vitest-plugin`）は `wrangler.jsonc` を読む。`cf` の文書には Vitest の扱いが書かれていない | [4]、この repo の `packages/hub/vitest.config.ts` |
-| 記録をその場で流す（`tail`）と、秘密の値を1つだけ入れ直すことは、`cf` ではまだできない | [5] |
+| 記録をその場で流す（`tail`）ことは、`cf` ではまだできない（秘密の値の入れ直しは `cf workers secrets update` でできる。§2.6） | [5] |
 
 このため、束縛（DO・KV・Worker Loader・変数・互換性フラグ）を変えたときは、**`wrangler.jsonc` と `cloudflare.config.ts` の両方を直す**。
 
-`cf` はベータなので、コマンドと設定の書き方は正式版までに変わりうる [6]。下の手順は 2026-10-24 時点の文書に沿う。
+`cf` はベータなので、コマンドと設定の書き方は正式版までに変わりうる [6]。下の手順は 2026-10-24 時点の `cf` 1.0.0-beta.21 で確かめた。
 
 ---
 
 ## 2. デプロイ
 
-### 2.1 `cf` を入れて、サインインする
+2026-10-24 にこの手順で `cf` 1.0.0-beta.21 を使ってデプロイし、動くことを確かめた（§2.7）。
 
-```bash
-npm install --global cf
-cf --version
-cf auth login          # 手元にブラウザがなければ cf auth login --no-browser
-cf auth whoami
-```
+### 2.1 サインインする
 
-`cf` は Wrangler のサインインを使い回さないので、Wrangler でサインイン済みでも一度サインインする [3]。
+`cf` は hub の devDependency に入っている（`pnpm install` で入る）。以下は `packages/hub` で行う。
 
 ```bash
 pnpm install
 cd packages/hub
+pnpm exec cf auth login              # 手元にブラウザがなければ --no-browser（リンクとコードが出る。5分で切れる）
+pnpm exec cf auth whoami
+export CLOUDFLARE_ACCOUNT_ID=<whoami に出たアカウントの id>
 ```
+
+- `cf` は Wrangler のサインインを使い回さないので、Wrangler でサインイン済みでも一度サインインする [3]。
+- 承認の画面で求められる権限のうち「Account API Token Provisioning」は外してよい。外してもデプロイまでできた。
+- サインインの有効期限は1時間ほど（`cf auth login` の表示に出る）。
 
 ### 2.2 OAuth の状態を置く KV を作る
 
-`cf` は Cloudflare の公開 API の操作を一通り持つ。KV 名前空間を作るコマンドの名前は、ローカルの検索で確かめる（資格情報は要らない）[7]。
-
 ```bash
-cf cli search "create a KV namespace"
-cf <見つかったコマンド> --help      # 引数を確かめる
-cf schema <見つかったコマンド>       # API に送る項目（KV 名前空間は title）
+pnpm exec cf kv namespaces create --title ai-research-oauth
 ```
 
-`title` を `ai-research-oauth` などにして作り、返ってきた JSON の `id` を `wrangler.jsonc` の `REPLACE_WITH_OAUTH_KV_ID` と置き換えて、**commit する**（次の `cf migrate` は作業ツリーが汚れていると何も書かない [8]）。
+返ってきた JSON の `id` を、`cloudflare.config.ts` の `OAUTH_KV` と `wrangler.jsonc` の `kv_namespaces` の両方に書く（この repo には作った名前空間の `id` が入っている。別のアカウントに置くときは書き換える）。同じ `title` の名前空間がすでにあると 400 で失敗する。
 
-### 2.3 設定を `cloudflare.config.ts` に変換する
+コマンドの名前は `cf cli search "<したいこと>"` で探せる（ローカルで動き、資格情報は要らない）[7]。
 
-```bash
-cf migrate --dry-run     # 何が書かれるかを見る
-cf migrate               # cloudflare.config.ts と wrangler.config.ts を書く。cf を devDependency に足す
-```
+### 2.3 設定（`cloudflare.config.ts`）
 
-この repo には `@cloudflare/vite-plugin` がないので、束ねには Wrangler が選ばれる [8]。`cf migrate` は既存のファイル（`wrangler.jsonc`、`package.json` のスクリプト、ソース）を書き換えない [8]。
+`cf dev`・`cf build`・`cf deploy` は `packages/hub/cloudflare.config.ts` を読む。この設定は `cf migrate` で `wrangler.jsonc` から作り、次を手で直したもの [8]。
 
-変換のあと、手で直すところ：
-
-1. **Durable Object の宣言**。`migrations` は変換されない [8]。まだ一度もデプロイしていないので、3つのクラスを SQLite で宣言するだけでよい。
-
-   ```ts
-   import { bindings, defineConfig, exports } from "cf/config";
-   // worker の中
-   exports: {
-     LedgerDO: exports.durableObject({ storage: "sqlite" }),
-     RunDO: exports.durableObject({ storage: "sqlite" }),
-     HostLimiterDO: exports.durableObject({ storage: "sqlite" }),
-   },
-   ```
-
-   `env` の `LEDGER`・`RUNS`・`LIMITER` は `bindings.durableObject({ worker: "ai-research", exportName: "LedgerDO" })` の形になっているかを見る [9]。
-2. **秘密の値の宣言**。`.dev.vars` と `.env` は読まれないので、`env` に `bindings.secret()` で宣言する [8]：`OWNER_PASSPHRASE`、使うものだけ `BRAVE_API_KEY` / `TAVILY_API_KEY` / `GITHUB_TOKEN`。
-3. **変数**。`SEARCH_PROVIDER: bindings.text("brave")`（`tavily` / `none`）[9]。
-4. **変換できなかった項目**。`TODO(@cloudflare)` の注記と `throw` が残っていると `cf build`・`cf deploy` は失敗する [8]。特に `worker_loaders`（`LOADER`）の変換は文書に書かれていないので、`bindings.workerLoader(...)` になっているかを必ず見る [9]。`compatibilityFlags` に `nodejs_compat` と `global_fetch_strictly_public` の両方があること、`observability` が有効なことも見る。
-5. **後片付け**。`.cloudflare/` は `.gitignore` に入れてある。生成された型を使うなら `cf workers types` を走らせ、`.cloudflare/types` を `tsconfig.json` に足す [8]。`package.json` の `dev` / `deploy` を `cf dev` / `cf deploy` に替える。
+- **Durable Object**：`migrations` は変換されないので、3つのクラスを `exports` に SQLite で宣言した（`exports.durableObject({ storage: "sqlite" })`）。初回のデプロイで「Durable Object exports reconciliation: Created: HostLimiterDO, LedgerDO, RunDO」と出る。
+- **秘密の値**：`OWNER_PASSPHRASE` と `BRAVE_API_KEY` を `bindings.secret()` で宣言した。**宣言した秘密の値がそろっていないと、新しい Worker はデプロイできない**（「required secrets have not been set」で止まる）。検索に Tavily を使うなら `BRAVE_API_KEY` を `TAVILY_API_KEY` に替え、`SEARCH_PROVIDER` を `tavily` にする。
+- **Worker Loader**：`cf migrate` が `bindings.workerLoader()` に変換した。
 
 ### 2.4 秘密の値を用意する
 
-`cf` では、秘密の値をデプロイと一緒に、ファイルから上げる（JSON か `.env` の形）[5][10]。`packages/hub/.secrets.env` を作る（`.gitignore` に入れてある。commit しない）。
+秘密の値はデプロイと一緒にファイルから上げる（`.env` の形か JSON）[5][10]。`packages/hub/.secrets.env` を作る（`.gitignore` に入れてある。commit しない）。
 
 ```bash
-# 同意ページで聞く合言葉。自分だけが知る長い文にする（E-01：公開の経路を作らない）
-OWNER_PASSPHRASE=...
-# 検索（使うほうだけ）
-BRAVE_API_KEY=...
-# 任意
-GITHUB_TOKEN=...
+umask 077
+python3 -c 'import secrets;print("OWNER_PASSPHRASE="+secrets.token_urlsafe(32))' > .secrets.env   # 同意ページの合言葉
+echo 'BRAVE_API_KEY=<Brave Search API のキー>' >> .secrets.env
 ```
 
 ### 2.5 常設の方針を自分用にする
@@ -116,15 +92,31 @@ GITHUB_TOKEN=...
 ### 2.6 確かめてからデプロイする
 
 ```bash
-pnpm check                                   # 依存の規則・型・試験（wrangler.jsonc を使う）
-cf build
-cf deploy --dry-run                          # API を呼ばず、資格情報も要らない [10]
-cf deploy --secrets-file .secrets.env
+pnpm check                                          # 依存の規則・型・試験（wrangler.jsonc を使う）
+pnpm exec cf build
+pnpm exec cf deploy --prebuilt --dry-run            # API を呼ばず、資格情報も要らない [10]
+pnpm exec cf deploy --prebuilt --secrets-file .secrets.env
 ```
 
-デプロイ先の URL（例 `https://ai-research.<アカウント>.workers.dev`）を開き、`ai-research hub. MCP endpoint: /mcp` と出れば動いている。
+最後に URL が出る（この repo の利用者のものは `https://ai-research.ryo-morimoto-dev.workers.dev`）。開いて `ai-research hub. MCP endpoint: /mcp` と出れば動いている。
 
-2回目からも `cf deploy --secrets-file .secrets.env` で上げる。`--secrets-file` を付けずにデプロイしたとき、前の秘密の値が残るかどうかは文書に書かれていない。秘密の値を1つだけ替えたいときは、今は Wrangler で `npx wrangler secret put OWNER_PASSPHRASE --name ai-research` とする [5]。
+2回目からのデプロイ：`--secrets-file` を付けずにデプロイしたとき、前の秘密の値が残るかはまだ確かめていない。毎回 `--secrets-file .secrets.env` を付ける。秘密の値を1つだけ替えるときは、デプロイ済みの Worker に対して次を使う（`cf` のエラー文に出たコマンド）。
+
+```bash
+pnpm exec cf workers secrets update --worker ai-research --type secret_text
+```
+
+### 2.7 デプロイ後の確認（2026-10-24 に実施）
+
+| 確かめたこと | 結果 |
+|---|---|
+| `GET /` | `ai-research hub. MCP endpoint: /mcp` |
+| トークンなしの `POST /mcp` | 401。`WWW-Authenticate` に `resource_metadata` |
+| `/.well-known/oauth-authorization-server` | `client_id_metadata_document_supported: true`、DCR の登録先あり、PKCE は S256 |
+| 動的登録 → 同意ページ（合言葉）→ トークン → `tools/list` | 4つの道具（code、ledger_search、ledger_forget、ledger_export） |
+| `code` の道具で `research.start`（Brave の検索あり） | 9.2秒で最初の束。段落12件、出典4件（developers.cloudflare.com）、打ち切りなし、使用量 1,552 トークン |
+
+本番でも Worker Loader（code mode の実行環境）と Brave の検索が動いた。claude.ai からの接続は §3 で確かめる。
 
 ---
 
@@ -176,9 +168,9 @@ cf deploy --secrets-file .secrets.env
 | 性質ベーステストを多く | `FC_RUNS=20000 pnpm --filter @ai-research/core test` | 失敗したら出力の seed を `FC_SEED` に入れて再現する |
 | 形式仕様（速い） | `pnpm spec:check` | Quint のシミュレーション。正しい版は通り、わざと壊した版は違反が見つかること |
 | 形式仕様（重い） | `SPEC_MODE=full pnpm spec:check` | Apalache による上限付きのモデル検査を加える。Java 17 以上が要る |
-| デプロイ用の束ね | `cd packages/hub && cf build && cf deploy --dry-run` | 束ねて検証するだけ。資格情報は要らない [10]。`cf migrate` の前は `npx wrangler deploy --dry-run --outdir dist` |
+| デプロイ用の束ね | `cd packages/hub && pnpm exec cf build && pnpm exec cf deploy --prebuilt --dry-run` | 束ねて検証するだけ。資格情報は要らない [10] |
 
-GitHub Actions の定義は `ci/` にある（`.github/workflows/` に移すと動く。ci/README.md）。`ci.yml` が push と pull request ごとに `pnpm check`・`pnpm spec:check`・束ねの確認を、`nightly.yml` が毎晩、性質ベーステストを多めに回し、Apalache の検査を加える。`ci.yml` の束ねの確認は、`cloudflare.config.ts` を commit したら `npx cf build` と `npx cf deploy --dry-run` に替える。
+GitHub Actions の定義は `ci/` にある（`.github/workflows/` に移すと動く。ci/README.md）。`ci.yml` が push と pull request ごとに `pnpm check`・`pnpm spec:check`・束ねの確認を、`nightly.yml` が毎晩、性質ベーステストを多めに回し、Apalache の検査を加える。
 
 CI からデプロイするときは、`cf auth login` の代わりに `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を環境変数で渡す。トークンには、その作業に要る権限だけを付ける [10]。
 
