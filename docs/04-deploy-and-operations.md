@@ -158,6 +158,8 @@ claude.ai の新しい画面にはウェブ検索を切る切り替えがない�
 | Instructions for Claude | claude.ai の Settings > General [11][12] | すべての会話に効く。下の1行を足す |
 | スキル `ai-research-first` | claude.ai の Customize > Skills [13] | 説明文が「調べものをするとき」に当たると読み込まれ、手順を示す。コード実行を有効にしておく必要がある [13] |
 
+サーバーの説明文だけでは足りない。2026-10-24 の作業の会話では、ai-research の説明文（「調べものには自分で検索せずこの道具を使う」）が読み込まれていたのに、Claude はウェブ検索とページの取得を使った。会話の側の指示（Instructions for Claude）とスキルの両方を入れる。
+
 Instructions for Claude に足す1行：
 
 ```text
