@@ -36,6 +36,7 @@ import { Gateway, classifyUrl, type Doc } from "./gateway.ts";
 import { ledgerStub, type LedgerRecord } from "./ledger.ts";
 import { routeStub } from "./route.ts";
 import { deadlines, timeScale } from "./time.ts";
+import { timed } from "./obs.ts";
 
 /**
  * 1つの調査の実行（docs/03 §2.5.1、specs/run.qnt）。1依頼に1つ（idFromName(runId)）。
@@ -122,8 +123,8 @@ export class RunDO extends DurableObject<Env> {
 
   private async load(): Promise<Meta | null> {
     if (!this.loaded) {
-      this.meta = (await this.ctx.storage.get<Meta>("meta")) ?? null;
-      this.events = (await this.ctx.storage.get<RunEvent[]>("events")) ?? [];
+      this.meta = (await timed("run.load.meta", () => this.ctx.storage.get<Meta>("meta"))) ?? null;
+      this.events = (await timed("run.load.events", () => this.ctx.storage.get<RunEvent[]>("events"))) ?? [];
       this.counters.ev = this.events.at(-1)?.ev ?? 0;
       if (this.meta?.counters) Object.assign(this.counters, this.meta.counters);
       this.loaded = true;
@@ -135,9 +136,10 @@ export class RunDO extends DurableObject<Env> {
     if (this.meta) {
       const { task, source, passage, hit } = this.counters;
       this.meta.counters = { task, source, passage, hit };
-      await this.ctx.storage.put("meta", this.meta);
+      const meta = this.meta;
+      await timed("run.save.meta", () => this.ctx.storage.put("meta", meta));
     }
-    await this.ctx.storage.put("events", this.events.slice(-MAX_EVENTS));
+    await timed("run.save.events", () => this.ctx.storage.put("events", this.events.slice(-MAX_EVENTS)));
   }
 
   private log(type: string, data: Record<string, unknown> = {}): void {
@@ -531,7 +533,7 @@ export class RunDO extends DurableObject<Env> {
     if (input.exclusions) meta.exclusions = input.exclusions;
     this.meta = meta;
     this.log("start", { v: 1 });
-    await this.ctx.storage.setAlarm(Date.now() + deadlines(this.env).continueUntilMs * timeScale(this.env));
+    await timed("run.setAlarm", () => this.ctx.storage.setAlarm(Date.now() + deadlines(this.env).continueUntilMs * timeScale(this.env)));
     this.launch(1, { queries, urls, question });
     return this.firstBundle(1);
   }

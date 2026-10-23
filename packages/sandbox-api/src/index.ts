@@ -66,6 +66,16 @@ export type ClaimStatus = {
 
 export type VerifyResult = { statuses: ClaimStatus[]; notices: Notice[] };
 
+/**
+ * 実行環境に渡す関数の失敗（設計 v1.3 D12、制約 P-05）。例外ではなく値で返す。
+ *   busy          ハブが一時的に応えられない（過負荷、ストレージの時間切れ、初期化）。少しおいて同じ呼び出しをもう一度
+ *   run_not_found その runId の調査がない（期限切れ、初期化で失われた）。start からやり直す
+ *   bad_input     渡した値が型に合わない。message を見て直す
+ *   internal      それ以外。経路外で調べる
+ */
+export type HubErrorCode = "busy" | "run_not_found" | "bad_input" | "internal";
+export type HubError = { error: { code: HubErrorCode; retryable: boolean; message: string; next: string; runId?: string } };
+
 /** モデルが読む型定義。道具の説明文に埋め込む */
 export const SANDBOX_TYPES = `
 type SourceRef = { kind: "web" | "github" | "arxiv"; url: string; title?: string; locator: string };

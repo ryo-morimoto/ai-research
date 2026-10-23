@@ -1,31 +1,68 @@
 import type { ResolvedProvider, Executor } from "@cloudflare/codemode";
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
-import type { QuestionInput, ClaimInput } from "@ai-research/sandbox-api";
+import type { Bundle, ClaimInput, QuestionInput } from "@ai-research/sandbox-api";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
 import { routeStub } from "./route.ts";
+import { ClaimsInput, NextOpts, RunIdInput, StartInput, SteerInput, hubError, parse, runNotFound } from "./boundary.ts";
 
 /**
  * code mode の実行環境に渡す関数（docs/03 §2.3）。
  * 実行環境からは外へ通信できない（globalOutbound: null、INV-12）。外への取得はハブの関数だけが行う。
+ * 境界（boundary.ts）で、入る値を型に直し、出る失敗を HubError に直す（P-05）。
  */
+type Fn = (...args: unknown[]) => Promise<unknown>;
+
+/** 例外を値（HubError）に直す。runId を知っている呼び出しは、それを添える */
+function guarded(fn: (...args: unknown[]) => Promise<unknown>, runIdOf?: (args: unknown[]) => string | undefined): Fn {
+  return async (...args) => {
+    try {
+      return await fn(...args);
+    } catch (e) {
+      const runId = runIdOf?.(args);
+      console.log(JSON.stringify({ event: "hub_error", message: String((e as Error)?.message ?? e).slice(0, 300), runId }));
+      return hubError(e, typeof runId === "string" && /^run_/.test(runId) ? runId : undefined);
+    }
+  };
+}
+
+const firstArg = (args: unknown[]) => (typeof args[0] === "string" ? args[0] : undefined);
+const notFound = (b: { notices?: { kind: string }[] }, runId: string) =>
+  b.notices?.some((n) => n.kind === "run_not_found") ? runNotFound(runId) : b;
+
 export function providers(env: Env, client?: string): ResolvedProvider[] {
-  const research: Record<string, (...args: unknown[]) => Promise<unknown>> = {
-    start: async (q: unknown) => {
+  const research: Record<string, Fn> = {
+    start: guarded(async (q: unknown) => {
+      const input = parse(StartInput, q, "start") as QuestionInput;
       const runId = `run_${crypto.randomUUID()}`;
       await routeStub(env).noteResearchStart().catch(() => {});
-      return runStub(env, runId).start(runId, q as QuestionInput, client);
-    },
-    next: async (runId: unknown, opts?: unknown) =>
-      runStub(env, String(runId)).next(Number((opts as { waitMs?: number } | undefined)?.waitMs ?? 0)),
-    verify: async (runId: unknown, claims: unknown) => runStub(env, String(runId)).verify((claims as ClaimInput[]) ?? []),
-    steer: async (runId: unknown, q: unknown) =>
-      runStub(env, String(runId)).steer(q as { question: string; queries: string[]; urls?: string[] }),
-    deepen: async (runId: unknown) => runStub(env, String(runId)).deepen(),
+      return runStub(env, runId).start(runId, input, client);
+    }),
+    next: guarded(async (runId: unknown, opts?: unknown) => {
+      const id = parse(RunIdInput, runId, "runId");
+      const o = parse(NextOpts, opts, "opts");
+      return notFound((await runStub(env, id).next(Number(o?.waitMs ?? 0))) as Bundle, id);
+    }, firstArg),
+    verify: guarded(async (runId: unknown, claims: unknown) => {
+      const id = parse(RunIdInput, runId, "runId");
+      const c = parse(ClaimsInput, claims ?? [], "claims") as ClaimInput[];
+      return notFound(await runStub(env, id).verify(c), id);
+    }, firstArg),
+    steer: guarded(async (runId: unknown, q: unknown) => {
+      const id = parse(RunIdInput, runId, "runId");
+      const input = parse(SteerInput, q, "steer");
+      const q2: { question: string; queries: string[]; urls?: string[] } = { question: input.question, queries: input.queries ?? [] };
+      if (input.urls) q2.urls = input.urls;
+      return notFound((await runStub(env, id).steer(q2)) as Bundle, id);
+    }, firstArg),
+    deepen: guarded(async (runId: unknown) => {
+      const id = parse(RunIdInput, runId, "runId");
+      return notFound((await runStub(env, id).deepen()) as Bundle, id);
+    }, firstArg),
   };
-  const ledger: Record<string, (...args: unknown[]) => Promise<unknown>> = {
-    search: async (text: unknown) => {
+  const ledger: Record<string, Fn> = {
+    search: guarded(async (text: unknown) => {
       const stub = ledgerStub(env);
       const seq = await stub.currentSeq();
       const rows = await stub.search(String(text ?? ""), { snapshotSeq: seq, limit: 20 });
@@ -35,7 +72,7 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
         source: { kind: r.kind, url: r.url, locator: r.locator, ...(r.title ? { title: r.title } : {}) },
         verifiedAt: r.verifiedAt,
       }));
-    },
+    }),
   };
   return [
     { name: "research", fns: research },

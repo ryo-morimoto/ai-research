@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { hostPolicy, POLICY, type HostPolicy } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 import { sleep, timeScale } from "./time.ts";
+import { timed } from "./obs.ts";
 
 /**
  * 頻度制限（docs/03 §2.6.5、specs/limiter.qnt）。取得先ホストごとに1つ。
@@ -10,6 +11,8 @@ import { sleep, timeScale } from "./time.ts";
  *   INV-7 同時に有効な許可証は maxConcurrent 以下
  *
  * 開始時刻は DO が割り当てる。DO の中の時刻はすべて実時間（ミリ秒）。
+ * 保存するのは間隔の判断に要る lastStart（と記録）だけ。許可証は期限つきなのでメモリだけに持ち、
+ * 返すときに書き込まない（1回の取得あたりの書き込みを1回にする）。
  * 試験で時間を縮めたとき（TEST_TIME_SCALE）は、方針の間隔も同じ割合で縮める。
  */
 type Lease = { leaseId: string; startAt: number; expiresAt: number };
@@ -24,9 +27,8 @@ export class HostLimiterDO extends DurableObject<Env> {
 
   private async load(): Promise<void> {
     if (this.loaded) return;
-    const s = await this.ctx.storage.get<{ leases: Lease[]; lastStart: number; starts: number[] }>("state");
+    const s = await timed("limiter.load", () => this.ctx.storage.get<{ lastStart: number; starts: number[] }>("state"));
     if (s) {
-      this.leases = s.leases;
       this.lastStart = s.lastStart;
       this.starts = s.starts;
     }
@@ -34,7 +36,8 @@ export class HostLimiterDO extends DurableObject<Env> {
   }
 
   private async save(): Promise<void> {
-    await this.ctx.storage.put("state", { leases: this.leases, lastStart: this.lastStart, starts: this.starts.slice(-200) });
+    const state = { lastStart: this.lastStart, starts: this.starts.slice(-200) };
+    await timed("limiter.save", () => this.ctx.storage.put("state", state));
   }
 
   async acquire(policy: HostPolicy, ttlMs: number): Promise<AcquireResult> {
@@ -59,9 +62,7 @@ export class HostLimiterDO extends DurableObject<Env> {
 
   async release(leaseId: string): Promise<void> {
     await this.load();
-    const before = this.leases.length;
     this.leases = this.leases.filter((l) => l.leaseId !== leaseId);
-    if (this.leases.length !== before) await this.save();
   }
 
   /** 試験と点検用：これまでに割り当てた開始時刻 */
