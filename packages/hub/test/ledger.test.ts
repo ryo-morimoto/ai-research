@@ -94,6 +94,17 @@ describe("台帳（LedgerDO）", () => {
     expect(rust.map((h) => h.url)).toEqual(["https://c.example/rust"]);
   });
 
+  it("別の話題しか台帳にないときは、何も返さない（関連の絶対の下限。設計 v1.4 §8.2.3、利用者の判断：話題の区切りは作らない）", async () => {
+    const l = ledger();
+    const t1 = "FIs can shift attention to three hierarchical levels of control: task learning, task motivation, and meta-tasks.";
+    const t2 = "The hook can deny the tool call and return a reason to the model.";
+    await l.appendVerified(excerptFrom(t1, t1, { url: "https://x.example/feedback", locator: "x" }), "normal", "r");
+    await l.appendVerified(excerptFrom(t2, t2, { url: "https://code.example/hooks", locator: "y" }), "normal", "r");
+    const seq = await l.currentSeq();
+    const hits = await l.search(["Gollwitzer の熟慮マインドセット", "Gollwitzer deliberative implemental mindsets control of action"], { snapshotSeq: seq, limit: 5 });
+    expect(hits).toEqual([]);
+  });
+
   it("制約：抜き書きは300字まで（SQL の CHECK でも拒む）", async () => {
     const l = ledger();
     await expect(

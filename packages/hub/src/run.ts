@@ -19,7 +19,7 @@ import {
   type Phase,
   type Source,
 } from "@ai-research/core";
-import { EMPTY_NEXT, POLICY, procedureVersion } from "@ai-research/policy";
+import { EMPTY_NEXT, POLICY, procedureVersion, tierOf } from "@ai-research/policy";
 import type {
   Mode,
   Bundle,
@@ -491,7 +491,9 @@ export class RunDO extends DurableObject<Env> {
         continue;
       }
       seen.add(key);
-      candidates.push({ sourceId: p.sourceId, index: p.index, text: p.text, passageId: p.passageId, ...(p.context ? { context: p.context } : {}) } as Paragraph & { passageId: string });
+      const src = this.sources.get(p.sourceId)?.doc.source;
+      const weight = src ? POLICY.tierWeight[tierOf(src)] : 1;
+      candidates.push({ sourceId: p.sourceId, index: p.index, text: p.text, weight, passageId: p.passageId, ...(p.context ? { context: p.context } : {}) } as Paragraph & { passageId: string });
     }
     const selected = selectPassages(candidates, [m.question, ...m.queries], {
       passageMaxChars: POLICY.limits.passageMaxChars,
@@ -499,6 +501,7 @@ export class RunDO extends DurableObject<Env> {
       passagesPerSource: POLICY.modes[m.mode].passagesPerSource,
       maxTokens: Math.min(POLICY.limits.bundleMaxTokens, remaining),
       minRatio: POLICY.passages.minRatio,
+      minCoverage: POLICY.relevance.minCoverage,
     });
     const byKey = new Map(candidates.map((c) => [`${c.sourceId}#${c.index}`, c as Paragraph & { passageId: string }]));
     let passages: Passage[] = selected.map((s) => {

@@ -37,3 +37,91 @@ describe("blocksFromMarkdown（設計 v1.3 D10）", () => {
     expect(c[0]!.index).toBe(blocks.findIndex((x) => x.text === "本文。"));
   });
 });
+
+import { markReferences, isReferenceHeading, looksLikeCitation, coverage, selectPassages } from "../src/index.ts";
+import fc from "fast-check";
+
+describe("参考文献の塊（設計 v1.4 §8.2.3）", () => {
+  it("参考文献・脚注・関連項目・外部リンクの節の中は ref にする。次の節で戻る", () => {
+    const out = markReferences([
+      { kind: "heading", text: "Findings" },
+      { kind: "prose", text: "Deliberative mindsets are open-minded.", context: "Findings" },
+      { kind: "heading", text: "7 References[edit]" },
+      { kind: "item", text: "Some reference without the usual shape" },
+      { kind: "heading", text: "参考文献" },
+      { kind: "prose", text: "本の名前" },
+      { kind: "heading", text: "Discussion" },
+      { kind: "prose", text: "Back to content." },
+    ]);
+    expect(out.map((b) => b.kind)).toEqual(["heading", "prose", "heading", "ref", "heading", "ref", "heading", "prose"]);
+  });
+
+  it("見出しの名前の判定（節番号・編集の印・コロンを除いて比べる）", () => {
+    for (const h of ["References", "REFERENCES", "See also", "External links", "Further reading", "Notes", "脚注", "関連項目", "外部リンク", "2. Bibliography:"]) {
+      expect(isReferenceHeading(h), h).toBe(true);
+    }
+    for (const h of ["Reference architecture for agents", "Notes on the method", "Results"]) expect(isReferenceHeading(h), h).toBe(false);
+  });
+
+  it("著者, 頭文字. (年). の並びは、どの節にあっても ref。本文の中の引用は当てない", () => {
+    expect(looksLikeCitation("Gollwitzer, P. M., & Bayer, U. (1999). Deliberative versus implemental mindsets in the control of action.")).toBe(true);
+    expect(looksLikeCitation("^ Gilbert, D. T. (1991). How mental systems believe. American Psychologist, 46, 107–119.")).toBe(true);
+    expect(looksLikeCitation("Gollwitzer (1990) showed that deliberative mindsets are open-minded.")).toBe(false);
+    expect(looksLikeCitation("Taylor and Gollwitzer (1995) demonstrated that the implemental mindset produces optimism.")).toBe(false);
+    const [b] = markReferences([{ kind: "item", text: "Kluger, A. N., & DeNisi, A. (1996). The effects of feedback interventions on performance." }]);
+    expect(b!.kind).toBe("ref");
+  });
+});
+
+describe("関連の絶対の下限（被覆率、設計 v1.4 §8.2.3）", () => {
+  const q = ["Gollwitzer の熟慮マインドセットと実行マインドセットの研究", "Gollwitzer deliberative implemental mindsets Heckhausen 1990"];
+  it("別の話題の抜き書きは下限に届かない。関係のある文は届く。複数形の s はそろえる", () => {
+    expect(coverage("suggests that FIs improved performance on average (d =.41) but that over 1/3 of the FIs decreased performance", q)).toBeLessThan(0.34);
+    expect(coverage("can also produce correct and logical responses without relying on the slower, more deliberative processing", q)).toBeLessThan(0.34);
+    expect(coverage("How can I increase my downloads?", q)).toBe(0);
+    expect(coverage("Second, memory. Taylor and Gollwitzer (1995) demonstrated that the implemental mindset produces optimistic self-views.", q)).toBeGreaterThanOrEqual(0.34);
+    expect(coverage("実行マインドセットでは情報の処理が選択的になる", ["熟慮マインドセット 実行マインドセット"])).toBeGreaterThanOrEqual(0.34);
+  });
+
+  it("ひらがなだけの語と英語の機能語は分母に入れない", () => {
+    expect(coverage("について", ["について の"])).toBe(0);
+    expect(coverage("the of and", ["the of and"])).toBe(0);
+  });
+
+  it("性質：0〜1。問いをそのまま含む文は 1", () => {
+    fc.assert(
+      fc.property(fc.string({ minLength: 1, maxLength: 40 }), fc.string({ maxLength: 80 }), (query, text) => {
+        const c = coverage(text, [query]);
+        expect(c).toBeGreaterThanOrEqual(0);
+        expect(c).toBeLessThanOrEqual(1);
+        const full = coverage(`${text} ${query}`, [query]);
+        expect(full === 1 || full === 0).toBe(true);
+      }),
+    );
+  });
+
+  it("関係のある段落がひとつもないときは、いちばんましなものも返さない", () => {
+    const out = selectPassages(
+      [
+        { sourceId: "s1", index: 0, text: "Mindset 1990: Historical graph of downloads" },
+        { sourceId: "s1", index: 1, text: "Number of pages | 6" },
+      ],
+      q,
+      { passageMaxChars: 600, passagesPerBundle: 5, passagesPerSource: 3, maxTokens: 10_000, minRatio: 0.3, minCoverage: 0.34 },
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("出典の種類の重み：同じ文なら重いほうが先", () => {
+    const text = "The deliberative mindset is open-minded and the implemental mindset is closed-minded.";
+    const out = selectPassages(
+      [
+        { sourceId: "blog", index: 0, text, weight: 0.8 },
+        { sourceId: "paper", index: 0, text, weight: 1.5 },
+      ],
+      q,
+      { passageMaxChars: 600, passagesPerBundle: 5, passagesPerSource: 3, maxTokens: 10_000, minRatio: 0, minCoverage: 0.34 },
+    );
+    expect(out.map((p) => p.sourceId)).toEqual(["paper", "blog"]);
+  });
+});

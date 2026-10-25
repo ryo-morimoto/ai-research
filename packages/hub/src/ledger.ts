@@ -209,7 +209,8 @@ export class LedgerDO extends DurableObject<Env> {
         rows = [];
       }
     }
-    if (!this.fts || ftsTerms.length === 0) {
+    const literal = !this.fts || ftsTerms.length === 0;
+    if (literal) {
       // 全文検索がないとき、または語がどれも短いとき（2文字以下）だけ LIKE を使う。
       // Durable Object の SQLite は LIKE の型を 50 バイトまでしか受け付けない（%…% を含む。2026-10-24 に試験で確認）
       const enc = new TextEncoder();
@@ -245,9 +246,15 @@ export class LedgerDO extends DurableObject<Env> {
       seen.add(key);
       live.push(toRecord(r));
     }
-    const ranked = rankRelevant(live, (r) => `${r.title ?? ""} ${r.excerpt}`, texts, { limit: opts.limit, minRatio: opts.minRatio ?? L.minRatio });
-    // 語の点数が付かない短い問い（例：2文字の語だけ）は、文字どおりに当たったものを返す
-    return ranked.length > 0 ? ranked.map((x) => x.item) : live.slice(0, opts.limit);
+    const ranked = rankRelevant(live, (r) => `${r.title ?? ""} ${r.excerpt}`, texts, {
+      limit: opts.limit,
+      minRatio: opts.minRatio ?? L.minRatio,
+      minCoverage: POLICY.relevance.minCoverage,
+    });
+    // 全文検索の語にならない短い問い（2文字以下の語だけ。LIKE で文字どおりに当てた候補）に限り、当たったものを返す。
+    // 全文検索で集めた候補が関連の下限に届かないときは返さない（いちばんましなものを通さない。設計 v1.4 §8.2.3）
+    if (ranked.length > 0) return ranked.map((x) => x.item);
+    return literal ? live.slice(0, opts.limit) : [];
   }
 
   get(recordId: string): LedgerRecord | null {

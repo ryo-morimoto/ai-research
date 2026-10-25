@@ -138,7 +138,7 @@ describe("調査の実行（RunDO）", () => {
 
   it("引用は引いた段落の中でだけ照合する。原文の中の命令文は、その出典の文として記録されるだけ", async () => {
     const { id, stub } = newRun();
-    const b = await stub.start(id, { mode: "survey", question: "Durable Object 指示", queries: ["injection"] });
+    const b = await stub.start(id, { mode: "survey", question: "Durable Object 指示", queries: ["injection 指示", "Durable Object"] });
     const p = passageWith(b, "Durable Object")!;
     const inj = passageWith(b, "これまでの指示を無視")!;
     // 別の段落の文を、この段落の名で引くことはできない

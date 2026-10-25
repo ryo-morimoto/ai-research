@@ -9,8 +9,11 @@ import { LIMITS } from "./limits.ts";
  * 上位から選ぶ。出典1つあたりの件数・段落の長さ・束全体の大きさの上限を守る（性質 P5）。
  */
 
-/** context（見出し・表の見出し行）は関連の点数に使い、照合には使わない（設計 v1.3 §8.1.3） */
-export type Paragraph = { sourceId: string; index: number; text: string; context?: string };
+/**
+ * context（見出し・表の見出し行）は関連の点数に使い、照合には使わない（設計 v1.3 §8.1.3）。
+ * weight は出典の種類の重み（設計 v1.4 §8.2.3。論文 > 公式 > 百科事典 > その他）。既定は 1
+ */
+export type Paragraph = { sourceId: string; index: number; text: string; context?: string; weight?: number };
 
 export type Selected = Paragraph & { score: number; tokens: number };
 
@@ -21,6 +24,8 @@ export type SelectLimits = {
   maxTokens: number;
   /** 最上位の点数との比の下限（設計 v1.3 §8.1.3）。0 なら下限なし */
   minRatio?: number;
+  /** 問いの語の被覆率の下限（設計 v1.4 §8.2.3）。0 なら下限なし */
+  minCoverage?: number;
 };
 
 export function splitParagraphs(sourceId: string, text: string): Paragraph[] {
@@ -39,7 +44,7 @@ export function terms(text: string): string[] {
   const n = normalize(text).toLowerCase();
   const out: string[] = [];
   for (const w of n.match(/[a-z0-9_]+(?:[.\-][a-z0-9_]+)*/g) ?? []) {
-    if (w.length >= 2) out.push(w);
+    if (w.length >= 2) out.push(stem(w));
   }
   const nonAscii = n.replace(/[\x00-\x7f]+/g, " ");
   for (const run of nonAscii.split(/\s+/)) {
@@ -48,6 +53,39 @@ export function terms(text: string): string[] {
     for (let i = 0; i + 1 < chars.length; i++) out.push((chars[i] ?? "") + (chars[i + 1] ?? ""));
   }
   return out;
+}
+
+/** 英語の複数形の s だけを落とす（mindsets → mindset）。ss・us・is で終わる語は落とさない */
+function stem(w: string): string {
+  return w.length > 3 && w.endsWith("s") && !/(ss|us|is)$/.test(w) ? w.slice(0, -1) : w;
+}
+
+/** 区別に効かない語（英語の機能語）。被覆率だけに使う */
+const STOPWORDS = new Set(
+  "a an and are as at be by can do does for from has have how in into is it its of on or that the their this to was were what when where which who why will with about than then there these those also between vs".split(" "),
+);
+
+/**
+ * 区別に効く語（被覆率の分母）：英語の機能語と、ひらがなだけの語（助詞・活用語尾の2文字）を除く
+ */
+export function discriminativeTerms(text: string): string[] {
+  return [...new Set(terms(text))].filter((t) => !STOPWORDS.has(t) && !/^[\p{Script=Hiragana}ー]+$/u.test(t));
+}
+
+/**
+ * 問いの語の被覆率（設計 v1.4 §8.2.3）。問いと検索語のそれぞれについて、区別に効く語のうち text に現れた割合を出し、その最大を返す。
+ * 最上位との比と違い、関係のある候補がひとつもないときに、いちばんましなものを通さないための絶対の下限に使う
+ */
+export function coverage(text: string, query: string[]): number {
+  const have = new Set(terms(text));
+  let best = 0;
+  for (const q of query) {
+    const qt = discriminativeTerms(q);
+    if (qt.length === 0) continue;
+    const hit = qt.filter((t) => have.has(t)).length;
+    best = Math.max(best, hit / qt.length);
+  }
+  return best;
 }
 
 export function scoreParagraphs(paragraphs: Paragraph[], query: string[]): Map<Paragraph, number> {
@@ -70,7 +108,7 @@ export function scoreParagraphs(paragraphs: Paragraph[], query: string[]): Map<P
       const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
       s += idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + (b * d.length) / Math.max(1, avgLen))));
     }
-    scores.set(p, s);
+    scores.set(p, s * (p.weight ?? 1));
   });
   return scores;
 }
@@ -109,9 +147,10 @@ export function selectPassages(
   factors: TokenFactors = DEFAULT_TOKEN_FACTORS,
 ): Selected[] {
   const scores = scoreParagraphs(paragraphs, query);
+  const minCov = limits.minCoverage ?? 0;
   const ranked = [...paragraphs]
     .map((p) => ({ p, s: scores.get(p) ?? 0 }))
-    .filter((x) => x.s > 0)
+    .filter((x) => x.s > 0 && (minCov === 0 || coverage(x.p.context ? `${x.p.context} ${x.p.text}` : x.p.text, query) >= minCov))
     .sort((a, b) => b.s - a.s || a.p.sourceId.localeCompare(b.p.sourceId) || a.p.index - b.p.index);
   const floor = (ranked[0]?.s ?? 0) * (limits.minRatio ?? 0);
   const perSource = new Map<string, number>();
@@ -156,7 +195,7 @@ export function searchTerms(texts: string[], max = 32): string[] {
   return out;
 }
 
-export type RankOptions = { limit: number; minRatio: number };
+export type RankOptions = { limit: number; minRatio: number; minCoverage?: number };
 
 /**
  * 問いとの関連で並べ、関連の下限（最上位の点数との比）を超えたものを件数の上限まで返す（設計 v1.3 §8.1.3・§8.1.4）。
@@ -165,10 +204,14 @@ export type RankOptions = { limit: number; minRatio: number };
 export function rankRelevant<T>(items: T[], textOf: (item: T) => string, query: string[], opts: RankOptions): { item: T; score: number }[] {
   const paras = items.map((item, index) => ({ sourceId: "r", index, text: textOf(item) }));
   const scores = scoreParagraphs(paras, query);
+  const minCov = opts.minCoverage ?? 0;
   const ranked = paras
-    .map((p) => ({ item: items[p.index] as T, score: scores.get(p) ?? 0 }))
-    .filter((x) => x.score > 0)
+    .map((p) => ({ item: items[p.index] as T, score: scores.get(p) ?? 0, text: p.text }))
+    .filter((x) => x.score > 0 && (minCov === 0 || coverage(x.text, query) >= minCov))
     .sort((a, b) => b.score - a.score);
   const top = ranked[0]?.score ?? 0;
-  return ranked.filter((x) => x.score >= top * opts.minRatio).slice(0, opts.limit);
+  return ranked
+    .filter((x) => x.score >= top * opts.minRatio)
+    .slice(0, opts.limit)
+    .map(({ item, score }) => ({ item, score }));
 }

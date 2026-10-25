@@ -43,22 +43,56 @@ export const POLICY = {
    * 利用者が追加する。どの機械・会話から依頼しても同じに効く（Q-05、Q-06）。
    */
   excludedHosts: [] as string[],
-  /** 常設の方針：論文・一次資料を優先する（検索結果の並べ替え） */
-  preferredHosts: [
-    "arxiv.org",
-    "github.com",
-    "acm.org",
-    "ieee.org",
-    "ietf.org",
-    "rfc-editor.org",
-    "w3.org",
-    "go.jp",
-    "ac.jp",
-    "developers.cloudflare.com",
-    "docs.anthropic.com",
-    "platform.claude.com",
-    "code.claude.com",
-  ],
+  /**
+   * 出典の種類（設計 v1.4 D13、§8.2.6）。pattern はホスト名の末尾一致。
+   * 論文（work・arxiv）と GitHub は、取得先によらず種類が決まる。検索結果の並べ替えは paper と official を前にする
+   */
+  sourceTiers: {
+    paper: [
+      "arxiv.org",
+      "doi.org",
+      "pmc.ncbi.nlm.nih.gov",
+      "pubmed.ncbi.nlm.nih.gov",
+      "europepmc.org",
+      "biorxiv.org",
+      "medrxiv.org",
+      "psyarxiv.com",
+      "acm.org",
+      "ieee.org",
+      "link.springer.com",
+      "sciencedirect.com",
+      "onlinelibrary.wiley.com",
+      "journals.sagepub.com",
+      "tandfonline.com",
+      "psycnet.apa.org",
+      "academic.oup.com",
+      "cambridge.org",
+      "nature.com",
+      "science.org",
+      "pnas.org",
+      "frontiersin.org",
+      "plos.org",
+      "jstor.org",
+      "annualreviews.org",
+    ],
+    official: [
+      "github.com",
+      "ietf.org",
+      "rfc-editor.org",
+      "w3.org",
+      "go.jp",
+      "ac.jp",
+      "developers.cloudflare.com",
+      "docs.anthropic.com",
+      "platform.claude.com",
+      "code.claude.com",
+    ],
+    encyclopedia: ["wikipedia.org", "wikiwand.com", "grokipedia.com", "britannica.com", "scholarpedia.org", "weblio.jp", "kotobank.jp"],
+  },
+  /** 出典の種類の重み（段落の順位。設計 v1.4 §8.2.3）。「論文と一次資料を優先」を順位の仕組みで持つ */
+  tierWeight: { paper: 1.5, official: 1.3, encyclopedia: 1.0, other: 0.8 },
+  /** 関連の絶対の下限（問いの語の被覆率。設計 v1.4 §8.2.3）。段落と台帳で同じ値 */
+  relevance: { minCoverage: 0.34 },
   search: { resultsPerQuery: 5, maxSourcesPerRun: 8 },
   /**
    * 依頼の種類（設計 v1.3 D9、§8.1.2）。種類から、返す量・取得の範囲・締め切り・続きの有無を決める。
@@ -162,8 +196,27 @@ export function isExcluded(host: string): boolean {
   return hostMatches(host, POLICY.excludedHosts);
 }
 
+export type Tier = "paper" | "official" | "encyclopedia" | "other";
+
+/** 出典の種類（設計 v1.4 D13）。保存せず、出典の種類と URL から決める */
+export function tierOf(source: { kind: string; url: string }): Tier {
+  if (source.kind === "work" || source.kind === "arxiv") return "paper";
+  if (source.kind === "github") return "official";
+  let host = "";
+  try {
+    host = new URL(source.url).hostname;
+  } catch {
+    return "other";
+  }
+  if (hostMatches(host, POLICY.sourceTiers.paper)) return "paper";
+  if (hostMatches(host, POLICY.sourceTiers.official)) return "official";
+  if (hostMatches(host, POLICY.sourceTiers.encyclopedia)) return "encyclopedia";
+  return "other";
+}
+
+/** 検索結果で前に並べる取得先（論文と公式） */
 export function isPreferred(host: string): boolean {
-  return hostMatches(host, POLICY.preferredHosts);
+  return hostMatches(host, POLICY.sourceTiers.paper) || hostMatches(host, POLICY.sourceTiers.official);
 }
 
 /**

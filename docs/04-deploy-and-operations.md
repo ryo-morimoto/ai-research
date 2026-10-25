@@ -85,7 +85,7 @@ echo 'BRAVE_API_KEY=<Brave Search API のキー>' >> .secrets.env
 `packages/policy/src/index.ts` の `POLICY` を見直す。
 
 - `excludedHosts`：検索の結果から外す取得先（アフィリエイトや SEO 目的のサイトなど）。初期値は空。
-- `preferredHosts`：前に並べる一次資料の取得先。
+- `sourceTiers`：出典の種類（論文・公式・百科事典）の取得先。論文と公式は検索結果で前に並べ、段落の順位に `tierWeight` の重みを付ける。
 - `hosts`：取得先ごとの頻度制限。取得先の規約が変わったらここを直す。
 - 中身を変えたら `revision` を上げる。`procedure_version` は中身のハッシュから自動で変わり、実行記録に残る。
 

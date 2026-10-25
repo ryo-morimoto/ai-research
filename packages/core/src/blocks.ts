@@ -8,7 +8,7 @@ import type { Paragraph } from "./select.ts";
  * 段落の候補にするのは、文として読める塊（prose、item、row、meta）だけ。
  * 見出しと表の見出し行は context として添える。照合の対象は text だけ。
  */
-export type BlockKind = "prose" | "item" | "row" | "heading" | "code" | "meta";
+export type BlockKind = "prose" | "item" | "row" | "heading" | "code" | "meta" | "ref";
 
 export type Block = { kind: BlockKind; text: string; context?: string };
 
@@ -31,6 +31,50 @@ export function candidateParagraphs(sourceId: string, blocks: Block[]): (Paragra
     out.push(p);
   });
   return out;
+}
+
+/**
+ * 参考文献・脚注・関連項目・外部リンクの節の見出しか（設計 v1.4 §8.2.3）。
+ * 節番号（"7."）と編集の印（"[edit]"、"[編集]"）は除いて比べる
+ */
+const REF_HEADING =
+  /^(references?|notes?|footnotes?|endnotes?|see also|external links?|further reading|bibliography|sources|citations|works cited|literature cited|reference list|参考文献|脚注|注釈|注|関連項目|外部リンク|出典|引用文献|参照|関連文献)$/i;
+
+export function isReferenceHeading(text: string): boolean {
+  const t = normalize(text)
+    .replace(/\[(edit|編集|ソースを編集)\]/gi, "")
+    .replace(/^[\d.\s]+/, "")
+    .replace(/[:：]$/, "")
+    .trim();
+  return REF_HEADING.test(t);
+}
+
+/**
+ * 参考文献の並び（著者, 頭文字. (年). 題名）の形か。Wikipedia の「^」で始まる脚注も含む。
+ * 文の途中に引用があるだけの文（"Gollwitzer (1990) showed …"）は当てない（年の後ろに "." が要る）
+ */
+const CITATION = /^[\^↑*]?\s*(\d+\.\s+)?[\p{Lu}][\p{L}'’-]+,\s+(\p{Lu}\.\s?){1,3}.{0,400}?\(\d{4}[a-z]?\)\.\s/u;
+
+export function looksLikeCitation(text: string): boolean {
+  return CITATION.test(normalize(text));
+}
+
+/**
+ * 参考文献の塊に印を付ける（kind を "ref" にする。段落の候補にしない）。
+ * 照合の全文（docText）には残すので、原文の順番は変わらない
+ */
+export function markReferences(blocks: Block[]): Block[] {
+  let inRef = false;
+  return blocks.map((b) => {
+    if (b.kind === "heading") {
+      inRef = isReferenceHeading(b.text);
+      return b;
+    }
+    if (b.kind === "meta" || b.kind === "code") return b;
+    if (inRef || (b.context !== undefined && isReferenceHeading(b.context.split(" — ").at(-1) ?? ""))) return { ...b, kind: "ref" };
+    if ((b.kind === "item" || b.kind === "prose") && looksLikeCitation(b.text)) return { ...b, kind: "ref" };
+    return b;
+  });
 }
 
 /** 空行で区切った文を prose の塊にする（形の分からない文書） */

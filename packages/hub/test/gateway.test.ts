@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
 import { Gateway, classifyUrl, rankHits } from "../src/gateway.ts";
+import { candidateParagraphs } from "@ai-research/core";
 import { extractHtml } from "../src/extract.ts";
 import { upstreamLog, upstreamSet } from "./helpers.ts";
 
@@ -34,6 +35,29 @@ describe("取得の出口（Gateway）", () => {
     ]);
     expect(blocks.filter((b) => b.kind === "item").map((b) => b.text)).toEqual(["Outer item", "Inner item"]);
     expect(blocks.some((b) => b.text.includes("@context"))).toBe(false);
+  });
+
+  it("参考文献・関連項目の節と、著者・年・題名の並びは段落の候補にしない（設計 v1.4 §8.2.3）", async () => {
+    await upstreamSet({
+      url: "https://wiki.example.org/Mindset",
+      contentType: "text/html",
+      body: `<html><head><title>Mindset</title></head><body><article><h1>Mindset</h1>
+        <p>${"Deliberative mindsets are characterized by open-minded processing of information about the desirability and feasibility of goals. ".repeat(3)}</p>
+        <h2>See also</h2><ul><li>Implemental mindset theory overview</li></ul>
+        <h2>References</h2><ol><li>Gollwitzer, P. M. (1990). Action phases and mind-sets. In Handbook of motivation and cognition.</li><li>Some other entry without shape</li></ol>
+        <h2>Criticism</h2><ul><li>Bayer, U. C., & Gollwitzer, P. M. (2005). Mindset effects on information search. European Journal of Social Psychology.</li><li>Replications were mixed.</li></ul>
+      </article></body></html>`,
+    });
+    const r = await new Gateway(env).fetchDoc("https://wiki.example.org/Mindset");
+    if (!r.ok || !("doc" in r)) throw new Error("取得できない");
+    const cands = candidateParagraphs("s", r.doc.blocks).map((p) => p.text);
+    expect(cands.some((t) => t.startsWith("Deliberative mindsets"))).toBe(true);
+    expect(cands).toContain("Replications were mixed.");
+    expect(cands.some((t) => /Gollwitzer, P\. M\./.test(t))).toBe(false);
+    expect(cands).not.toContain("Implemental mindset theory overview");
+    expect(cands).not.toContain("Some other entry without shape");
+    // 照合の全文には残す
+    expect(r.doc.text).toContain("Action phases and mind-sets");
   });
 
   it("<meta http-equiv=refresh> の転送を1回だけ追う（/releases/latest/ のような URL）", async () => {
