@@ -143,3 +143,15 @@ describe("導入の文（設計 v1.4 §8.2.5）", () => {
     expect(out[0]!.kind).toBe("prose");
   });
 });
+
+describe("被覆率：日英が混ざった問い・1語だけの一致（設計 v1.4 §8.2.3）", () => {
+  it("日英が混ざった長い問いでも、英語の文書を日本語の語の数で薄めない", () => {
+    const q = ["Kahneman & Klein 2009 原文: 直観的専門性が信頼できる条件(environment of sufficient regularity / opportunity to learn) の記述箇所"];
+    const abs = "Kahneman and Klein argue that skilled intuitions develop in an environment of sufficient regularity, given an opportunity to learn its regularities.";
+    expect(coverage(abs, q)).toBeGreaterThanOrEqual(0.34);
+  });
+  it("2語以上の組で1語だけ当たったものは数えない", () => {
+    expect(coverage("The API limit is applied per IP address.", ["Cloudflare の API の制限"])).toBe(0);
+    expect(coverage("Cloudflare API rate limits", ["Cloudflare の API の制限"])).toBe(1);
+  });
+});

@@ -77,6 +77,8 @@ def analyze(path, case, secs):
         "precision": round(len(cited & ids) / len(ids), 2) if ids else None,
         "answer": est_tokens(final), "off_path": "経路外" in final, "error": error, "tools": names,
         "urls": len(urls), "scholarly": sum(1 for u in urls if SCHOLARLY.search(u)), "empty": empty,
+        # Q-08：答えが一次資料（論文の DOI・PMC など）を出典に挙げたか
+        "answer_scholarly": len(set(m.group(0) for m in re.finditer(r"https?://[^\s)\]>」]+", final) if SCHOLARLY.search(m.group(0)))) + len(set(re.findall(r"\bdoi:\s?10\.\d{4,9}/\S+", final))),
     }
 
 def main():
@@ -93,7 +95,7 @@ def main():
     with cf.ThreadPoolExecutor(args.parallel) as ex:
         rows = list(ex.map(lambda c: run_case(c, args, outdir), cases))
     json.dump(rows, open(os.path.join(outdir, "summary.json"), "w"), ensure_ascii=False, indent=1)
-    cols = ["id", "secs", "calls", "research", "in_tokens", "passages", "urls", "scholarly", "empty", "answer", "off_path", "error"]
+    cols = ["id", "secs", "calls", "research", "in_tokens", "passages", "urls", "scholarly", "empty", "answer", "answer_scholarly", "off_path", "error"]
     print(" | ".join(cols))
     for r in rows: print(" | ".join(str(r[c]) for c in cols))
     tot = {c: sum(r[c] for r in rows) for c in ["calls", "research", "in_tokens", "answer"]}

@@ -73,17 +73,24 @@ export function discriminativeTerms(text: string): string[] {
 }
 
 /**
- * 問いの語の被覆率（設計 v1.4 §8.2.3）。問いと検索語のそれぞれについて、区別に効く語のうち text に現れた割合を出し、その最大を返す。
- * 最上位との比と違い、関係のある候補がひとつもないときに、いちばんましなものを通さないための絶対の下限に使う
+ * 問いの語の被覆率（設計 v1.4 §8.2.3）。最上位との比と違い、関係のある候補がひとつもないときに、
+ * いちばんましなものを通さないための絶対の下限に使う。
+ *
+ * - 問いと検索語のそれぞれを、英数字の語の組と、それ以外（日本語など）の語の組に分け、組ごとに text に現れた割合を出して最大を返す。
+ *   日英が混ざった問いでも、片方の言語の文書を、もう片方の語の数で薄めない
+ * - 2語以上の組では、1語だけ当たったものは数えない（"API" だけ当たった別の話題を通さない）
  */
 export function coverage(text: string, query: string[]): number {
   const have = new Set(terms(text));
   let best = 0;
   for (const q of query) {
-    const qt = discriminativeTerms(q);
-    if (qt.length === 0) continue;
-    const hit = qt.filter((t) => have.has(t)).length;
-    best = Math.max(best, hit / qt.length);
+    const all = discriminativeTerms(q);
+    for (const group of [all.filter((t) => /^[\x00-\x7f]+$/.test(t)), all.filter((t) => !/^[\x00-\x7f]+$/.test(t))]) {
+      if (group.length === 0) continue;
+      const hit = group.filter((t) => have.has(t)).length;
+      if (hit < Math.min(2, group.length)) continue;
+      best = Math.max(best, hit / group.length);
+    }
   }
   return best;
 }
