@@ -52,7 +52,7 @@ describe("MCP（道具の面）", () => {
     }`);
     expect(r.isError).toBe(false);
     expect(r.value.passages).toBeGreaterThan(0);
-    expect(r.value.status).toBe("確認済");
+    expect(r.value.status).toBe("引用確認済");
     expect(r.value.hits).toBe(1);
   });
 

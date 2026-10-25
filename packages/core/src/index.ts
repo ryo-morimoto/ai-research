@@ -10,6 +10,8 @@ export {
   type MatchKind,
   type MatchResult,
   type MatchOptions,
+  type MismatchReason,
+  type Nearest,
 } from "./verify.ts";
 export {
   splitParagraphs,
@@ -52,4 +54,4 @@ export {
   type BlockKind,
 } from "./blocks.ts";
 export { LIMITS, type Limits } from "./limits.ts";
-export type { Source, SourceKind, Fingerprint, Volatility, ClaimStatusLabel } from "./types.ts";
+export type { Source, SourceKind, Fingerprint, Volatility, ClaimStatusLabel, Tier } from "./types.ts";

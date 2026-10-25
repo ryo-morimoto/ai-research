@@ -209,7 +209,7 @@ describe("段落の前後（research.around、設計 v1.4 §8.2.5）", () => {
     const lead = ar.passages[1]!;
     const second = ar.passages[3]!;
     const v = await stub.verify([{ text: "練習で学ぶ機会", cite: [{ passageId: second.passageId, quote: "an opportunity to learn these regularities through prolonged practice" }] }]);
-    expect(v.statuses[0]!.status).not.toBe("未確認");
+    expect(v.statuses[0]!.status).toBe("引用確認済");
     await evictDurableObject(stub);
     const again = await stub.around(lead.passageId, 1, 0);
     expect(again.passages.map((p) => p.text)[1]).toBe(lead.text);

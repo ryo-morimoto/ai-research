@@ -24,9 +24,19 @@ export type VerifiedExcerpt = {
 
 export type MatchKind = "exact" | "context" | "fuzzy";
 
+/**
+ * 照合できなかった理由（設計 v1.4 §8.2.6）。
+ *   not_in_source   原文に近い箇所もない
+ *   marker_mismatch 記号・空白を除けば同じ並び（またはごく近い箇所）があるが、数字か否定が原文と違う
+ *   near_miss       あいまい一致の下限に届かない近い箇所がある（写し間違いか、言い換え）
+ * nearest は原文でいちばん近い箇所（写し間違いか表記の差かを、呼んだ側が判断できるように）
+ */
+export type MismatchReason = "empty_quote" | "quote_too_long" | "not_in_source" | "marker_mismatch" | "near_miss";
+export type Nearest = { text: string; score: number };
+
 export type MatchResult =
   | { ok: true; kind: MatchKind; start: number; end: number; score: number }
-  | { ok: false; reason: "empty_quote" | "quote_too_long" | "not_in_source" };
+  | { ok: false; reason: MismatchReason; nearest?: Nearest };
 
 export type MatchOptions = {
   /** 台帳のレコードから照らし直すときの前後の文脈 */
@@ -61,7 +71,36 @@ export function matchQuote(quote: string, sourceText: string, opts: MatchOptions
   if (fuzzy && fuzzy.score >= threshold) {
     return { ok: true, kind: "fuzzy", start: fuzzy.start, end: fuzzy.end, score: fuzzy.score };
   }
-  return { ok: false, reason: "not_in_source" };
+  return diagnose(q, src, threshold);
+}
+
+/** 近い箇所の下限（これより遠ければ、近い箇所として示さない） */
+const NEAREST_MIN = 0.5;
+/** 数字と否定を除いた近さがこれ以上なら、違いは数字か否定とみなす（理由の見出しだけに使う） */
+const DIAG_MARKER_MIN = 0.8;
+
+/** 照合できなかったときの理由と、原文でいちばん近い箇所（照合の判定には使わない） */
+function diagnose(q: string, src: string, threshold: number): Extract<MatchResult, { ok: false }> {
+  const near = (start: number, end: number, score: number): Nearest => ({ text: src.slice(start, end), score: Math.round(score * 100) / 100 });
+  // 記号・空白を除けば同じ並びがある → 違うのは数字か否定だけ
+  const target = loosen(q);
+  if (target.length > 0) {
+    const { loose, starts, ends } = loosenWithMap(src);
+    const li = loose.indexOf(target);
+    const start = starts[li];
+    const end = ends[li + target.length - 1];
+    if (li >= 0 && start !== undefined && end !== undefined) {
+      return { ok: false, reason: "marker_mismatch", nearest: near(start, end, similarity(q, src.slice(start, end))) };
+    }
+  }
+  const any = fuzzyLocate(q, src, false);
+  if (!any || any.score < NEAREST_MIN) return { ok: false, reason: "not_in_source" };
+  const span = src.slice(any.start, any.end);
+  // 数字と否定の語を除くと十分に近い → 違うのは数字か否定（意味の違い）
+  const strip = (x: string) => x.replace(NUMBER, " ").replace(NEGATION, " ").replace(/\s+/g, " ").trim();
+  // 理由の見出しを付けるだけなので、照合の下限より緩い値で比べる（照合の判定は変えない）
+  const reason = !sameMeaningMarkers(q, span) && similarity(strip(q), strip(span)) >= DIAG_MARKER_MIN ? "marker_mismatch" : "near_miss";
+  return { ok: false, reason, nearest: near(any.start, any.end, any.score) };
 }
 
 /**
@@ -117,7 +156,7 @@ function commonPrefixLength(a: string, b: string): number {
  * あいまい一致：引用の一部（8文字以上）を手がかりに位置を探し、
  * 同じ長さの窓との編集距離の比で点数を付ける。
  */
-function fuzzyLocate(q: string, src: string): { start: number; end: number; score: number } | null {
+function fuzzyLocate(q: string, src: string, requireMarkers = true): { start: number; end: number; score: number } | null {
   const anchorLen = Math.min(8, q.length);
   let best: { start: number; end: number; score: number } | null = null;
   const tried = new Set<number>();
@@ -134,7 +173,7 @@ function fuzzyLocate(q: string, src: string): { start: number; end: number; scor
           if (len <= 0 || start + len > src.length) continue;
           const span = src.slice(start, start + len);
           // 数字や否定の違いは「表記差」ではなく意味の違い。あいまい一致でも許さない
-          if (!sameMeaningMarkers(q, span)) continue;
+          if (requireMarkers && !sameMeaningMarkers(q, span)) continue;
           const score = similarity(q, span);
           if (!best || score > best.score) best = { start, end: start + len, score };
         }
@@ -196,9 +235,9 @@ export function verifyQuote(args: {
   fingerprint: Fingerprint;
   verifiedAt: string;
   options?: MatchOptions;
-}): { ok: true; excerpt: VerifiedExcerpt } | { ok: false; reason: Extract<MatchResult, { ok: false }>["reason"] } {
+}): { ok: true; excerpt: VerifiedExcerpt } | { ok: false; reason: MismatchReason; nearest?: Nearest } {
   const m = matchQuote(args.quote, args.sourceText, args.options);
-  if (!m.ok) return { ok: false, reason: m.reason };
+  if (!m.ok) return m.nearest ? { ok: false, reason: m.reason, nearest: m.nearest } : { ok: false, reason: m.reason };
   const src = normalize(args.sourceText);
   const maxChars = args.options?.excerptMaxChars ?? LIMITS.excerptMaxChars;
   const end = Math.min(m.end, m.start + maxChars);
@@ -216,9 +255,12 @@ export function verifyQuote(args: {
   return { ok: true, excerpt: ve };
 }
 
-/** 照合の種類から、利用者に見せる状態の表記へ */
-export function statusLabel(kind: MatchKind): "確認済" | "確認済（表記差あり）" {
-  return kind === "exact" ? "確認済" : "確認済（表記差あり）";
+/**
+ * 照合の種類から、利用者に見せる状態の表記へ（設計 v1.4 §8.2.6）。
+ * 確かめたのは「引用が原文にあるか」だけで、主張の正しさではないことを名前で示す
+ */
+export function statusLabel(kind: MatchKind): "引用確認済" | "引用確認済（表記差あり）" {
+  return kind === "exact" ? "引用確認済" : "引用確認済（表記差あり）";
 }
 
 /**
@@ -233,7 +275,7 @@ export function reverifyRecord(args: {
   source: Source;
   fingerprint: Fingerprint;
   verifiedAt: string;
-}): { ok: true; excerpt: VerifiedExcerpt } | { ok: false; reason: Extract<MatchResult, { ok: false }>["reason"] } {
+}): { ok: true; excerpt: VerifiedExcerpt } | { ok: false; reason: MismatchReason; nearest?: Nearest } {
   return verifyQuote({
     quote: args.excerpt,
     sourceText: args.sourceText,

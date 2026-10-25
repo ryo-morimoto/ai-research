@@ -203,3 +203,25 @@ describe("段落の点数に context を使う（照合には使わない）", (
     expect(r.map((x) => x.text)).toEqual(["CPU time per HTTP request | 10 ms | 5 min"]);
   });
 });
+
+describe("照合できなかった理由と、いちばん近い箇所（設計 v1.4 §8.2.6）", () => {
+  const src = "Results showed that feedback interventions improved performance on average (d = .41), but over one-third of them decreased performance.";
+  it("否定だけ違う → marker_mismatch。近い箇所を返す", () => {
+    const m = matchQuote("feedback interventions did not improve performance on average", src);
+    expect(m.ok).toBe(false);
+    if (!m.ok) expect(["marker_mismatch", "near_miss"]).toContain(m.reason);
+    const n = matchQuote("over one-third of them never decreased performance", src);
+    expect(!n.ok && n.reason).toBe("marker_mismatch");
+    expect(!n.ok && n.nearest?.text).toContain("decreased performance");
+  });
+  it("言い換えが大きい → near_miss と近い箇所", () => {
+    const m = matchQuote("feedback interventions boosted the performance on the whole", src);
+    expect(!m.ok && m.reason).toBe("near_miss");
+    expect(!m.ok && m.nearest?.text).toContain("feedback interventions");
+  });
+  it("関係のない文 → not_in_source（近い箇所は示さない）", () => {
+    const m = matchQuote("the implemental mindset produces optimistic self-views", src);
+    expect(!m.ok && m.reason).toBe("not_in_source");
+    expect(!m.ok && m.nearest).toBeUndefined();
+  });
+});

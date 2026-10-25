@@ -4,7 +4,7 @@
  * 取得先ごとの制限、上限値、締め切り、常設の方針、道具の説明文をここにまとめる。
  * 中身が変われば procedure_version（内容ハッシュ）が変わり、実行記録で比べられる（Q-05）。
  */
-import { LIMITS, DEFAULT_CAPS, DEFAULT_TOKEN_FACTORS, textHash } from "@ai-research/core";
+import { LIMITS, DEFAULT_CAPS, DEFAULT_TOKEN_FACTORS, textHash, type Tier } from "@ai-research/core";
 import { SANDBOX_TYPES } from "@ai-research/sandbox-api";
 
 export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent: number; timeoutMs?: number };
@@ -198,7 +198,7 @@ export function isExcluded(host: string): boolean {
   return hostMatches(host, POLICY.excludedHosts);
 }
 
-export type Tier = "paper" | "official" | "encyclopedia" | "other";
+export type { Tier };
 
 /** 出典の種類（設計 v1.4 D13）。保存せず、出典の種類と URL から決める */
 export function tierOf(source: { kind: string; url: string }): Tier {

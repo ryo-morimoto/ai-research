@@ -1,6 +1,7 @@
 import type { ResolvedProvider, Executor } from "@cloudflare/codemode";
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import type { Bundle, ClaimInput, QuestionInput } from "@ai-research/sandbox-api";
+import { tierOf } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
@@ -79,7 +80,7 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       return rows.map((r) => ({
         recordId: r.recordId,
         excerpt: r.excerpt,
-        source: { kind: r.kind, url: r.url, locator: r.locator, ...(r.title ? { title: r.title } : {}) },
+        source: { kind: r.kind, url: r.url, locator: r.locator, tier: tierOf(r), ...(r.title ? { title: r.title } : {}) },
         verifiedAt: r.verifiedAt,
       }));
     }),

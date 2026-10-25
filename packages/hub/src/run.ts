@@ -347,7 +347,7 @@ export class RunDO extends DurableObject<Env> {
     const markUnchanged = (fingerprint: Fingerprint) => {
       hit.verifiedText = `${rec.ctxBefore}${rec.excerpt}${rec.ctxAfter}`;
       hit.fingerprint = fingerprint;
-      finish("確認済");
+      finish("引用確認済");
     };
     const recheckWith = (doc: Doc) => {
       const r = reverifyRecord({
@@ -362,9 +362,9 @@ export class RunDO extends DurableObject<Env> {
       if (r.ok) {
         hit.verifiedText = `${r.excerpt.ctxBefore}${r.excerpt.excerpt}${r.excerpt.ctxAfter}`;
         hit.fingerprint = doc.fingerprint;
-        finish("確認済");
+        finish("引用確認済");
       } else {
-        finish("未確認", "出典が変わり、抜き書きが見つからない");
+        finish("照合失敗", "出典が変わり、抜き書きが見つからない");
       }
     };
 
@@ -387,10 +387,10 @@ export class RunDO extends DurableObject<Env> {
       }
     }
     const r = await gw.fetchDoc(rec.url, method === "conditional-get" ? rec.fingerprint : undefined);
-    if (!r.ok) return finish("未確認", `取得できない（${r.cutoff.why}）`);
+    if (!r.ok) return finish("取得できず未照合", `取得できない（${r.cutoff.why}）`);
     if ("notModified" in r) {
       if (judgeRevalidation(rec.fingerprint, { method: "conditional-get", status: 304 }) === "unchanged") return markUnchanged(rec.fingerprint);
-      return finish("未確認", "変わったかどうか判定できない");
+      return finish("取得できず未照合", "変わったかどうか判定できない");
     }
     const doc = r.doc;
     if (method === "conditional-get" && doc.fingerprint.textHash) {
@@ -421,7 +421,7 @@ export class RunDO extends DurableObject<Env> {
   private toPassage(p: ParaEntry): Passage {
     const s = this.sources.get(p.sourceId);
     const src: Source = s?.doc.source ?? { kind: "web", url: this.meta!.passageMeta[p.passageId]?.url ?? "", locator: "" };
-    const out: Passage = { passageId: p.passageId, text: p.text, source: { ...src } };
+    const out: Passage = { passageId: p.passageId, text: p.text, source: { ...src, tier: tierOf(src) } };
     if (p.context) out.context = p.context;
     return out;
   }
@@ -441,7 +441,13 @@ export class RunDO extends DurableObject<Env> {
           passageId: h.passageId,
           recordId: h.record.recordId,
           excerpt: h.record.excerpt,
-          source: { kind: h.record.kind, url: h.record.url, locator: h.record.locator, ...(h.record.title ? { title: h.record.title } : {}) },
+          source: {
+            kind: h.record.kind,
+            url: h.record.url,
+            locator: h.record.locator,
+            tier: tierOf(h.record),
+            ...(h.record.title ? { title: h.record.title } : {}),
+          },
           status: h.status,
           verifiedAt: h.record.verifiedAt,
         };
@@ -762,7 +768,7 @@ export class RunDO extends DurableObject<Env> {
     if (a.allowed < want) {
       notices.push({ kind: "budget_stopped", phase: m.budget.phase });
       await this.save();
-      return { statuses: list.map((_, index) => ({ index, status: "未確認", reason: "budget" })), notices };
+      return { statuses: list.map((_, index) => ({ index, status: "未照合", reason: "budget" })), notices };
     }
     const ledger = ledgerStub(this.env);
     const statuses: ClaimStatus[] = [];
@@ -770,11 +776,12 @@ export class RunDO extends DurableObject<Env> {
       const claim = list[index]!;
       const cites = Array.isArray(claim.cite) ? claim.cite : [];
       if (cites.length === 0) {
-        statuses.push({ index, status: "未確認", reason: "no_citation" });
+        statuses.push({ index, status: "未照合", reason: "no_citation" });
         continue;
       }
       let allExact = true;
       let failure: ClaimStatus["reason"] | null = null;
+      let nearest: ClaimStatus["nearest"];
       const recorded: string[] = [];
       for (const c of cites) {
         const target = await this.citationTarget(String(c.passageId ?? ""));
@@ -791,17 +798,18 @@ export class RunDO extends DurableObject<Env> {
         });
         if (!r.ok) {
           failure = r.reason;
+          if (r.nearest) nearest = r.nearest;
           break;
         }
-        if (statusLabel(r.excerpt.match) !== "確認済") allExact = false;
+        if (statusLabel(r.excerpt.match) !== "引用確認済") allExact = false;
         const vol = classifyVolatility({ kind: target.source.kind, url: target.source.url, excerpt: r.excerpt.excerpt });
         const rec = await ledger.appendVerified(r.excerpt, vol, m.runId);
         recorded.push(rec.recordId);
       }
-      if (failure) statuses.push({ index, status: "未確認", reason: failure, ...(recorded.length ? { recorded } : {}) });
-      else statuses.push({ index, status: allExact ? "確認済" : "確認済（表記差あり）", recorded });
+      if (failure) statuses.push({ index, status: "照合失敗", reason: failure, ...(nearest ? { nearest } : {}), ...(recorded.length ? { recorded } : {}) });
+      else statuses.push({ index, status: allExact ? "引用確認済" : "引用確認済（表記差あり）", recorded });
     }
-    this.log("verify", { v: m.version, n: list.length, ok: statuses.filter((s) => s.status !== "未確認").length });
+    this.log("verify", { v: m.version, n: list.length, ok: statuses.filter((s) => s.status.startsWith("引用確認済")).length });
     await this.save();
     return { statuses, notices };
   }
@@ -816,7 +824,7 @@ export class RunDO extends DurableObject<Env> {
     const hit = this.hits.get(passageId);
     if (hit) {
       if (hit.v !== m.version) return { ok: false, reason: "stale_version" };
-      if (hit.status !== "確認済" || !hit.verifiedText) return { ok: false, reason: "not_in_source" };
+      if (hit.status !== "引用確認済" || !hit.verifiedText) return { ok: false, reason: "not_in_source" };
       const source: Source = { kind: hit.record.kind, url: hit.record.url, locator: hit.record.locator };
       if (hit.record.title) source.title = hit.record.title;
       return { ok: true, text: hit.verifiedText, source, fingerprint: hit.fingerprint ?? hit.record.fingerprint };

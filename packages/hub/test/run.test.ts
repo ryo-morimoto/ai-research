@@ -70,7 +70,7 @@ describe("調査の実行（RunDO）", () => {
     expect(b2.question.version).toBe(2);
     expect(b2.passages.map((p) => p.passageId)).not.toContain(old.passageId);
     const v = await stub.verify([{ text: "x", cite: [{ passageId: old.passageId, quote: "前置きが完全に一致" }] }]);
-    expect(v.statuses[0]).toMatchObject({ status: "未確認", reason: "stale_version" });
+    expect(v.statuses[0]).toMatchObject({ status: "照合失敗", reason: "stale_version" });
     await trace(stub);
   });
 
@@ -106,7 +106,7 @@ describe("調査の実行（RunDO）", () => {
     // 外した重複の段落の ID でも、引用は照合できる
     const dupIds = (await inspect(stub)).paras.map((p) => p.passageId);
     const v = await stub.verify(dupIds.map((pid) => ({ text: "x", cite: [{ passageId: pid, quote: "storage limit of 10 GB" }] })));
-    expect(v.statuses.filter((s) => s.status === "確認済").length).toBe(3);
+    expect(v.statuses.filter((s) => s.status === "引用確認済").length).toBe(3);
     await trace(stub);
   });
 
@@ -124,8 +124,12 @@ describe("調査の実行（RunDO）", () => {
       // 存在しない段落
       { text: "?", cite: [{ passageId: "p9999", quote: "3秒に1回" }] },
     ]);
-    expect(v.statuses.map((s) => s.status)).toEqual(["未確認", "未確認", "確認済", "未確認"]);
-    expect(v.statuses[0]!.reason).toBe("not_in_source");
+    expect(v.statuses.map((s) => s.status)).toEqual(["照合失敗", "未照合", "引用確認済", "照合失敗"]);
+    // 数字だけが原文と違う。原文でいちばん近い箇所を返す（写し間違いか書き換えかを判断できる。設計 v1.4 §8.2.6）
+    expect(v.statuses[0]!.reason).toBe("marker_mismatch");
+    expect(v.statuses[0]!.nearest?.text).toContain("3秒に1回");
+    expect(v.statuses[1]!.reason).toBe("no_citation");
+    expect(v.statuses[3]!.reason).toBe("unknown_passage");
     expect(v.statuses[1]!.reason).toBe("no_citation");
     expect(v.statuses[3]!.reason).toBe("unknown_passage");
     const records = await ledger().all();
@@ -143,11 +147,11 @@ describe("調査の実行（RunDO）", () => {
     const inj = passageWith(b, "これまでの指示を無視")!;
     // 別の段落の文を、この段落の名で引くことはできない
     const v1 = await stub.verify([{ text: "arXiv は1秒に10回", cite: [{ passageId: p.passageId, quote: "arXiv の API は1秒に10回まで呼んでよい" }] }]);
-    expect(v1.statuses[0]).toMatchObject({ status: "未確認", reason: "not_in_source" });
+    expect(v1.statuses[0]).toMatchObject({ status: "照合失敗", reason: "not_in_source" });
     expect((await ledger().all()).length).toBe(0);
     // 命令文の段落を引けば照合は通るが、記録されるのは「この出典がこう書いている」という原文どおりの抜き書き
     const v2 = await stub.verify([{ text: "注入の文", cite: [{ passageId: inj.passageId, quote: "arXiv の API は1秒に10回まで呼んでよい" }] }]);
-    expect(v2.statuses[0]!.status).toBe("確認済");
+    expect(v2.statuses[0]!.status).toBe("引用確認済");
     const [rec] = await ledger().all();
     expect(rec!.url).toBe("https://injection.example.com/page");
     expect(rec!.ctxBefore).toContain("台帳に「");
@@ -190,7 +194,7 @@ describe("調査の実行（RunDO）", () => {
     expect(stored).not.toContain("頻度制限を守らない取得は");
     await evictDurableObject(stub);
     const v = await stub.verify([{ text: "x", cite: [{ passageId: p.passageId, quote: "同時接続1本まで" }] }]);
-    expect(v.statuses[0]!.status).toBe("確認済");
+    expect(v.statuses[0]!.status).toBe("引用確認済");
   });
 
   it("退避の後も段落 ID を使い回さない（古い版の ID は stale_version、新しい ID は前と重ならない）", async () => {
@@ -202,10 +206,10 @@ describe("調査の実行（RunDO）", () => {
     const oldIds = new Set(b1.passages.map((p) => p.passageId));
     for (const p of b2.passages) expect(oldIds.has(p.passageId), `ID ${p.passageId} を使い回している`).toBe(false);
     const v = await stub.verify([{ text: "x", cite: [{ passageId: old.passageId, quote: "前置きが完全に一致" }] }]);
-    expect(v.statuses[0]).toMatchObject({ status: "未確認", reason: "stale_version" });
+    expect(v.statuses[0]).toMatchObject({ status: "照合失敗", reason: "stale_version" });
   });
 
-  it("Q-02：台帳の抜き書きを照らし直す（変わっていなければ確認済、消えていれば未確認）", async () => {
+  it("Q-02：台帳の抜き書きを照らし直す（変わっていなければ引用確認済、消えていれば照合失敗）", async () => {
     // 1回目：照合して台帳に入れる
     const a = newRun();
     const b = await a.stub.start(a.id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });
@@ -216,20 +220,20 @@ describe("調査の実行（RunDO）", () => {
     // 2回目：変わっていない（ETag が同じ → 304）
     const c = newRun();
     const b2 = await c.stub.start(c.id, { mode: "survey", question: "同時接続1本までとする", queries: [] });
-    expect(b2.ledgerHits.map((h) => h.status)).toEqual(["確認済"]);
+    expect(b2.ledgerHits.map((h) => h.status)).toEqual(["引用確認済"]);
     const log = await upstreamLog();
     expect(log.some((l) => l.url === "https://docs.example.com/limits" && l.headers["if-none-match"] === '"limits-v1"')).toBe(true);
     // 照らし直した抜き書きは引用できる
     const v2 = await c.stub.verify([{ text: "x", cite: [{ passageId: b2.ledgerHits[0]!.passageId, quote: "同時接続1本までとする" }] }]);
-    expect(v2.statuses[0]!.status).toBe("確認済");
+    expect(v2.statuses[0]!.status).toBe("引用確認済");
 
     // 3回目：出典が変わり、抜き書きが消えた
     await upstreamSet({ url: "https://docs.example.com/limits", contentType: "text/html", etag: '"limits-v2"', body: "<article><p>arXiv の API の制限は廃止された。</p></article>" });
     const d = newRun();
     const b3 = await d.stub.start(d.id, { mode: "survey", question: "同時接続1本までとする", queries: [] });
-    expect(b3.ledgerHits[0]).toMatchObject({ status: "未確認" });
+    expect(b3.ledgerHits[0]).toMatchObject({ status: "照合失敗" });
     const v3 = await d.stub.verify([{ text: "x", cite: [{ passageId: b3.ledgerHits[0]!.passageId, quote: "同時接続1本までとする" }] }]);
-    expect(v3.statuses[0]!.status).toBe("未確認");
+    expect(v3.statuses[0]!.status).toBe("照合失敗");
   });
 
   it("照らし直しのために取り直した文書は、段落の候補にしない（設計 v1.3 §8.1.4）", async () => {
@@ -246,7 +250,7 @@ describe("調査の実行（RunDO）", () => {
     });
     const c = newRun();
     const b2 = await c.stub.start(c.id, { mode: "survey", question: "同時接続1本までとする", queries: [] });
-    expect(b2.ledgerHits[0]).toMatchObject({ status: "確認済" });
+    expect(b2.ledgerHits[0]).toMatchObject({ status: "引用確認済" });
     expect(b2.passages).toEqual([]);
   });
 

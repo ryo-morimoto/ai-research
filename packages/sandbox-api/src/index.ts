@@ -7,7 +7,8 @@
 
 export type SourceKind = "web" | "github" | "arxiv";
 
-export type SourceRef = { kind: SourceKind; url: string; title?: string; locator: string };
+/** tier は出典の種類（設計 v1.4 D13）：paper（論文）・official（公式）・encyclopedia（百科事典）・other */
+export type SourceRef = { kind: SourceKind; url: string; title?: string; locator: string; tier?: "paper" | "official" | "encyclopedia" | "other" };
 
 /** context は見出し・表の見出し行（照合の対象外）。照合で引用するのは text だけ */
 export type Passage = { passageId: string; text: string; context?: string; source: SourceRef };
@@ -17,7 +18,8 @@ export type LedgerHit = {
   recordId: string;
   excerpt: string;
   source: SourceRef;
-  status: "確認済" | "照合中" | "未確認";
+  /** 引用確認済：照らし直して原文にあった。照合失敗：原文が変わり抜き書きがない。取得できず未照合：取り直せなかった（設計 v1.4 §8.2.6） */
+  status: "引用確認済" | "照合中" | "照合失敗" | "取得できず未照合";
   reason?: string;
   /** 台帳に入れたとき（原文と照らした日時）。変わりやすい値の新しさを判断するため（Q-01） */
   verifiedAt: string;
@@ -74,10 +76,16 @@ export type ClaimInput = {
   cite: { passageId: string; quote: string }[];
 };
 
+/**
+ * 照合の状態（設計 v1.4 §8.2.6）。確かめるのは「引用が原文にあるか」だけで、主張の正しさは確かめない。
+ *   照合失敗：引用が原文に見つからない（reason と、原文でいちばん近い箇所 nearest）
+ *   未照合：引用がない（no_citation）、予算で照合していない（budget）
+ */
 export type ClaimStatus = {
   index: number;
-  status: "確認済" | "確認済（表記差あり）" | "未確認";
-  reason?: "no_citation" | "unknown_passage" | "not_in_source" | "quote_too_long" | "empty_quote" | "stale_version" | "budget";
+  status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合";
+  reason?: "no_citation" | "unknown_passage" | "not_in_source" | "marker_mismatch" | "near_miss" | "quote_too_long" | "empty_quote" | "stale_version" | "budget";
+  nearest?: { text: string; score: number };
   recorded?: string[];
 };
 
