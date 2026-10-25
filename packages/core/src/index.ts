@@ -44,6 +44,7 @@ export {
   candidateParagraphs,
   docText,
   markReferences,
+  attachLeadIns,
   isReferenceHeading,
   looksLikeCitation,
   CANDIDATE_KINDS,

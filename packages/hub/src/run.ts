@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   candidateParagraphs,
+  clip,
   normalize,
   selectPassages,
   verifyQuote,
@@ -22,6 +23,7 @@ import {
 import { EMPTY_NEXT, POLICY, procedureVersion, tierOf } from "@ai-research/policy";
 import type {
   Mode,
+  AroundResult,
   Bundle,
   ClaimInput,
   ClaimStatus,
@@ -691,6 +693,61 @@ export class RunDO extends DurableObject<Env> {
     this.log("deepen", { v: m.version });
     this.launch(m.version, { queries: m.queries, urls: m.urls, question: m.question, extra: true });
     return this.firstBundle(m.version);
+  }
+
+  /**
+   * 段落の前後を返す（設計 v1.4 §8.2.5）。同じ出典の前後の候補の塊を、照合できる段落として返す。
+   * 切り詰める前の全文を返す（上限 POLICY.around.maxChars）。退避で原文を失っていれば取り直す
+   */
+  async around(passageId: string, before = 1, after = 1): Promise<AroundResult> {
+    const m = await this.load();
+    if (!m) return { passages: [], cutoffs: [], notices: [{ kind: "run_not_found" }] };
+    const pm = m.passageMeta[passageId];
+    if (!pm) return { passages: [], cutoffs: [], notices: [{ kind: "passage_not_found", passageId }] };
+    if (pm.v !== m.version) return { passages: [], cutoffs: [], notices: [{ kind: "superseded", currentVersion: m.version }] };
+    let src = this.sources.get(pm.sourceId);
+    if (!src) {
+      const r = await this.gw().fetchDoc(pm.url);
+      if (!r.ok) return { passages: [], cutoffs: [r.cutoff], notices: [] };
+      if (!("doc" in r)) return { passages: [], cutoffs: [], notices: [{ kind: "passage_not_found", passageId }] };
+      src = { sourceId: pm.sourceId, doc: r.doc, v: m.version };
+      this.sources.set(pm.sourceId, src);
+    }
+    const cands = candidateParagraphs(pm.sourceId, src.doc.blocks);
+    const pos = cands.findIndex((c) => c.index === pm.index);
+    if (pos < 0) return { passages: [], cutoffs: [], notices: [{ kind: "passage_not_found", passageId }] };
+    const k = POLICY.around.maxEach;
+    const b = Math.min(k, Math.max(0, Math.floor(before)));
+    const a = Math.min(k, Math.max(0, Math.floor(after)));
+    const shown = this.shownTexts.get(m.version) ?? new Set<string>();
+    this.shownTexts.set(m.version, shown);
+    const query = [m.question, ...m.queries];
+    const passages: Passage[] = [];
+    for (const c of cands.slice(Math.max(0, pos - b), pos + a + 1)) {
+      let e = [...this.paras.values()].find((p) => p.v === m.version && p.sourceId === pm.sourceId && p.index === c.index);
+      if (!e) {
+        const id = Object.entries(m.passageMeta).find(([, x]) => x.v === m.version && x.sourceId === pm.sourceId && x.index === c.index)?.[0];
+        const passageId2 = id ?? `p${++this.counters.passage}`;
+        e = { passageId: passageId2, sourceId: pm.sourceId, text: c.text, v: m.version, index: c.index, delivered: false };
+        if (c.context) e.context = c.context;
+        this.paras.set(passageId2, e);
+        m.passageMeta[passageId2] = { sourceId: pm.sourceId, url: src.doc.source.url, locator: src.doc.source.locator, v: m.version, index: c.index };
+      }
+      e.delivered = true;
+      shown.add(normalize(e.text));
+      passages.push({ ...this.toPassage(e), text: clip(e.text, query, POLICY.around.maxChars) });
+    }
+    const notices: Notice[] = [];
+    const want = estimateJsonTokens(passages);
+    const adm = admit(m.budget, want, this.caps());
+    m.budget = adm.state;
+    if (adm.allowed < want) {
+      notices.push({ kind: "budget_stopped", phase: m.budget.phase });
+      passages.length = 0;
+    }
+    this.log("around", { v: m.version, passageId, n: passages.length });
+    await this.save();
+    return { passages, cutoffs: [], notices };
   }
 
   /** 主張を照合する。照合できた引用だけを台帳に追記する（INV-1、INV-5） */

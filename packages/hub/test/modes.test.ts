@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, runInDurableObject, evictDurableObject } from "cloudflare:test";
 import fc from "fast-check";
 import { routeStub } from "../src/route.ts";
 import type { RunDO } from "../src/run.ts";
@@ -180,5 +180,48 @@ describe("打ち切りの見せ方（Q-04）", () => {
         for (const it of items) expect(shown).toContain(it.cutoff.what);
       }),
     );
+  });
+});
+
+describe("段落の前後（research.around、設計 v1.4 §8.2.5）", () => {
+  const page = `<html><head><title>Conditions</title></head><body><article><h1>Conditions for intuitive expertise</h1>
+    <p>Kahneman and Klein argue that intuitive expertise develops only under particular conditions of the environment.</p>
+    <p>Intuitive judgments can be trusted when both of the following conditions hold:</p>
+    <ul><li>an environment that is sufficiently regular to be predictable</li><li>an opportunity to learn these regularities through prolonged practice</li></ul>
+    <p>Without these, confidence is not a reliable signal of accuracy.</p>
+  </article></body></html>`;
+
+  it("前後の塊を、照合できる段落として返す。導入の文は箇条の context になる。退避の後も取り直して返す", async () => {
+    const { id, stub } = newRun();
+    await upstreamSet({ url: "https://paper.example.org/kk2009", contentType: "text/html", body: page });
+    const b = await stub.start(id, { mode: "lookup", question: "Kahneman Klein intuitive expertise conditions", urls: ["https://paper.example.org/kk2009"] });
+    const first = b.passages.find((p) => p.text.startsWith("Kahneman and Klein argue"))!;
+    expect(first).toBeDefined();
+    const ar = await stub.around(first.passageId, 0, 3);
+    expect(ar.passages.map((p) => p.text)).toEqual([
+      first.text,
+      "Intuitive judgments can be trusted when both of the following conditions hold:",
+      "an environment that is sufficiently regular to be predictable",
+      "an opportunity to learn these regularities through prolonged practice",
+    ]);
+    expect(ar.passages[0]!.passageId).toBe(first.passageId);
+    expect(ar.passages[2]!.context).toContain("both of the following conditions hold:");
+    const lead = ar.passages[1]!;
+    const second = ar.passages[3]!;
+    const v = await stub.verify([{ text: "練習で学ぶ機会", cite: [{ passageId: second.passageId, quote: "an opportunity to learn these regularities through prolonged practice" }] }]);
+    expect(v.statuses[0]!.status).not.toBe("未確認");
+    await evictDurableObject(stub);
+    const again = await stub.around(lead.passageId, 1, 0);
+    expect(again.passages.map((p) => p.text)[1]).toBe(lead.text);
+    expect(again.passages[0]!.text).toContain("Kahneman and Klein argue");
+  });
+
+  it("知らない段落・古い版の段落は、理由を返す", async () => {
+    const { id, stub } = newRun();
+    const b = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュ", queries: ["cache"] });
+    expect((await stub.around("p999", 1, 1)).notices[0]).toMatchObject({ kind: "passage_not_found" });
+    const p = b.passages[0]!;
+    await stub.steer({ question: "取得先の制限", queries: ["limits"] });
+    expect((await stub.around(p.passageId, 1, 1)).notices[0]).toMatchObject({ kind: "superseded" });
   });
 });

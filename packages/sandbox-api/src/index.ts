@@ -39,6 +39,7 @@ export type Notice =
   | { kind: "superseded"; currentVersion: number }
   | { kind: "run_not_found" }
   | { kind: "empty"; why: EmptyReason; next: string }
+  | { kind: "passage_not_found"; passageId: string }
   | { kind: "done" };
 
 export type Bundle = {
@@ -81,6 +82,9 @@ export type ClaimStatus = {
 };
 
 export type VerifyResult = { statuses: ClaimStatus[]; notices: Notice[] };
+
+/** 段落の前後（設計 v1.4 §8.2.5）。前後の候補の塊を、照合できる段落として返す */
+export type AroundResult = { passages: Passage[]; cutoffs: Cutoff[]; notices: Notice[] };
 
 /**
  * 実行環境に渡す関数の失敗（設計 v1.3 D12、制約 P-05）。例外ではなく値で返す。

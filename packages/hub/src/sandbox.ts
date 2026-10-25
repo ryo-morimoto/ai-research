@@ -5,7 +5,7 @@ import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
 import { routeStub } from "./route.ts";
-import { ClaimsInput, NextOpts, RunIdInput, StartInput, SteerInput, hubError, parse, runNotFound } from "./boundary.ts";
+import { AroundOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, hubError, parse, runNotFound } from "./boundary.ts";
 
 /**
  * code mode の実行環境に渡す関数（docs/03 §2.3）。
@@ -43,6 +43,12 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       const id = parse(RunIdInput, runId, "runId");
       const o = parse(NextOpts, opts, "opts");
       return notFound((await runStub(env, id).next(Number(o?.waitMs ?? 0))) as Bundle, id);
+    }, firstArg),
+    around: guarded(async (runId: unknown, passageId: unknown, opts?: unknown) => {
+      const id = parse(RunIdInput, runId, "runId");
+      const pid = parse(PassageIdInput, passageId, "passageId");
+      const o = parse(AroundOpts, opts, "opts");
+      return notFound(await runStub(env, id).around(pid, o?.before ?? 1, o?.after ?? 1), id);
     }, firstArg),
     verify: guarded(async (runId: unknown, claims: unknown) => {
       const id = parse(RunIdInput, runId, "runId");

@@ -125,3 +125,21 @@ describe("関連の絶対の下限（被覆率、設計 v1.4 §8.2.3）", () => 
     expect(out.map((p) => p.sourceId)).toEqual(["paper", "blog"]);
   });
 });
+
+import { attachLeadIns } from "../src/index.ts";
+
+describe("導入の文（設計 v1.4 §8.2.5）", () => {
+  it("「：」で終わる文を、続く箇条の context に添える。箇条が終われば外す", () => {
+    const out = attachLeadIns([
+      { kind: "prose", text: "直観が信頼できるのは、次の二つの条件の両方が成り立つとき：", context: "結論" },
+      { kind: "item", text: "環境が十分に規則的であること", context: "結論" },
+      { kind: "item", text: "長い練習で規則性を学ぶ機会があること", context: "結論" },
+      { kind: "prose", text: "それ以外の場合は当てにならない。" },
+      { kind: "item", text: "関係のない箇条" },
+    ]);
+    expect(out[1]!.context).toBe("結論 — 直観が信頼できるのは、次の二つの条件の両方が成り立つとき：");
+    expect(out[2]!.context).toBe("結論 — 直観が信頼できるのは、次の二つの条件の両方が成り立つとき：");
+    expect(out[4]!.context).toBeUndefined();
+    expect(out[0]!.kind).toBe("prose");
+  });
+});

@@ -77,6 +77,21 @@ export function markReferences(blocks: Block[]): Block[] {
   });
 }
 
+/**
+ * 「：」「:」で終わる導入の文を、続く箇条の context に添える（設計 v1.4 §8.2.5）。
+ * 「次の二つの条件の両方が成り立つとき：」と条件の本体を、同じ候補として選べるようにする。導入の文そのものも残す
+ */
+export function attachLeadIns(blocks: Block[]): Block[] {
+  let lead: string | undefined;
+  return blocks.map((b) => {
+    if (b.kind === "item" && lead) {
+      return { ...b, context: b.context && !b.context.endsWith(lead) ? `${b.context} — ${lead}` : lead };
+    }
+    lead = b.kind === "prose" && /[:：]$/.test(b.text.trim()) ? b.text.trim() : undefined;
+    return b;
+  });
+}
+
 /** 空行で区切った文を prose の塊にする（形の分からない文書） */
 export function blocksFromPlainText(text: string): Block[] {
   return text

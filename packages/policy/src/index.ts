@@ -91,6 +91,8 @@ export const POLICY = {
   },
   /** 出典の種類の重み（段落の順位。設計 v1.4 §8.2.3）。「論文と一次資料を優先」を順位の仕組みで持つ */
   tierWeight: { paper: 1.5, official: 1.3, encyclopedia: 1.0, other: 0.8 },
+  /** 段落の前後（research.around、設計 v1.4 §8.2.5）。前後それぞれの上限と、1つの段落の文字数の上限 */
+  around: { maxEach: 3, maxChars: 1_500 },
   /** 関連の絶対の下限（問いの語の被覆率。設計 v1.4 §8.2.3）。段落と台帳で同じ値 */
   relevance: { minCoverage: 0.34 },
   search: { resultsPerQuery: 5, maxSourcesPerRun: 8 },

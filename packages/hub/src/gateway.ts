@@ -1,4 +1,4 @@
-import { blocksFromMarkdown, blocksFromPlainText, docText, markReferences, textHash, type Block, type Fingerprint, type Source } from "@ai-research/core";
+import { attachLeadIns, blocksFromMarkdown, blocksFromPlainText, docText, markReferences, textHash, type Block, type Fingerprint, type Source } from "@ai-research/core";
 import { POLICY, isForbidden, isExcluded, isPreferred } from "@ai-research/policy";
 import type { Cutoff } from "@ai-research/sandbox-api";
 import type { Env } from "./env.ts";
@@ -27,7 +27,8 @@ function toBlocks(body: string, format: "html" | "markdown" | "plain", url: stri
 
 async function makeDoc(source: Source, raw: Block[], fp: Omit<Fingerprint, "textHash"> = {}): Promise<Doc> {
   // 参考文献の塊は段落の候補にしない（設計 v1.4 §8.2.3）。どの取得経路でもここを通る
-  const blocks = markReferences(raw);
+  // 導入の文は続く箇条の context にする（§8.2.5）
+  const blocks = attachLeadIns(markReferences(raw));
   const text = docText(blocks);
   return { source, blocks, text, fingerprint: { ...fp, textHash: await textHash(text) } };
 }
