@@ -155,3 +155,9 @@ describe("被覆率：日英が混ざった問い・1語だけの一致（設計
     expect(coverage("Cloudflare API rate limits", ["Cloudflare の API の制限"])).toBe(1);
   });
 });
+
+describe("ハイフンでつないだ語", () => {
+  it("部分の語でも当たる", () => {
+    expect(coverage("explicitly accounts for order-effect phenomena", ["order effects"])).toBe(1);
+  });
+});

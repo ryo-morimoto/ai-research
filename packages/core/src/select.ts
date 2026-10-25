@@ -45,6 +45,8 @@ export function terms(text: string): string[] {
   const out: string[] = [];
   for (const w of n.match(/[a-z0-9_]+(?:[.\-][a-z0-9_]+)*/g) ?? []) {
     if (w.length >= 2) out.push(stem(w));
+    // ハイフンでつないだ語は、部分の語でも当てる（order-effect と "order effects"）
+    if (w.includes("-")) for (const part of w.split("-")) if (part.length >= 2 && !/^\d+$/.test(part)) out.push(stem(part));
   }
   const nonAscii = n.replace(/[\x00-\x7f]+/g, " ");
   for (const run of nonAscii.split(/\s+/)) {

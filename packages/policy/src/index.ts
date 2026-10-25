@@ -112,8 +112,11 @@ export const POLICY = {
     lookup: { ledgerShow: 3, passagesPerBundle: 5, passagesPerSource: 3, startMs: 15_000, continues: false, searchWithUrls: false },
     survey: { ledgerShow: 5, passagesPerBundle: 12, passagesPerSource: 4, startMs: 25_000, continues: true, searchWithUrls: true },
   },
-  /** 段落の候補の関連の下限（最上位との比。設計 v1.3 §8.1.3） */
-  passages: { minRatio: 0.3 },
+  /**
+   * 段落の候補の関連の下限（最上位との比。設計 v1.3 §8.1.3）。
+   * v1.4 で絶対の下限（relevance.minCoverage）を足したので 0.3 → 0.15 に下げた。短い題名の行が抄録を押し出していた（§8.2.9）
+   */
+  passages: { minRatio: 0.15 },
   /** 台帳の候補（設計 v1.3 §8.1.4）。関連の下限（最上位との比）を超えたものを show 件まで。照らし直すのはその後のものだけ */
   ledger: { show: 5, minRatio: 0.5, ftsCandidates: 200, likeTerms: 8, likePatternMaxBytes: 50 },
   userAgent: "ai-research/0.1 (+https://github.com/ryo-morimoto/ai-research)",
