@@ -21,13 +21,28 @@ type El = {
   querySelectorAll(sel: string): ArrayLike<El>;
 };
 
-const BLOCK_SEL = "h1, h2, h3, h4, h5, h6, p, li, tr, pre, blockquote, dt, dd, figcaption";
+const BLOCK_SEL = "h1, h2, h3, h4, h5, h6, p, li, tr, pre, blockquote, dt, dd, figcaption, div, section";
+/** 行内の要素（div・section の中の文として、その文字を拾う） */
+const INLINE = new Set(["A", "EM", "STRONG", "B", "I", "U", "SPAN", "SUP", "SUB", "CODE", "ABBR", "CITE", "Q", "SMALL", "MARK", "TIME", "BR", "FONT", "S", "DFN", "VAR", "KBD"]);
+/** div・section の中の、p に入っていない文を塊にする下限（画面の短い文言を拾わない） */
+const LOOSE_TEXT_MIN = 40;
 const CONTAINERS = new Set(["LI", "TR", "PRE", "DT", "DD", "FIGCAPTION", "P"]);
 const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
 
 function hasContainerAncestor(el: El): boolean {
   for (let p = el.parentElement; p; p = p.parentElement) if (CONTAINERS.has(p.tagName)) return true;
   return false;
+}
+
+/** div・section の、p などに入っていない文（文字と行内の要素だけ。塊の要素の中の文は、その要素で拾う） */
+function looseText(el: El): string {
+  let s = "";
+  for (let i = 0; i < el.childNodes.length; i++) {
+    const c = el.childNodes[i]!;
+    if (c.nodeType === 3) s += c.textContent ?? "";
+    else if (c.nodeType === 1 && INLINE.has(c.tagName ?? "")) s += c.tagName === "BR" ? " " : (c.textContent ?? "");
+  }
+  return clean(s);
 }
 
 /** li の文から、入れ子の箇条を除く */
@@ -100,7 +115,9 @@ export function metaRefreshTarget(html: string, base: string): string | null {
   }
 }
 
-export function extractHtml(html: string, url: string): { title: string | null; blocks: Block[] } {
+export function extractHtml(raw: string, url: string): { title: string | null; blocks: Block[] } {
+  // <br> は文字の上では空白（前後の文がつながらないように）
+  const html = raw.replace(/<br\s*\/?>/gi, " <br>");
   const { document } = parseHTML(html);
   const doc = document as unknown as El;
   let title: string | null = clean(document.querySelector("title")?.textContent) || null;
@@ -169,6 +186,12 @@ export function extractHtml(html: string, url: string): { title: string | null; 
     if (tag === "PRE") {
       const t = (el.textContent ?? "").trim();
       if (t) blocks.push({ kind: "code", text: t });
+      continue;
+    }
+    if (tag === "DIV" || tag === "SECTION") {
+      // ページによっては、抄録などの文が p に入らず div に直に書かれている（例：ERIC の抄録）
+      const t = looseText(el);
+      if (t.length >= LOOSE_TEXT_MIN) blocks.push(heading ? { kind: "prose", text: t, context: heading } : { kind: "prose", text: t });
       continue;
     }
     if (tag === "BLOCKQUOTE" && el.querySelector("p, li")) continue;

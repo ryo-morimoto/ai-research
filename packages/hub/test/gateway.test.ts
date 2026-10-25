@@ -60,6 +60,17 @@ describe("取得の出口（Gateway）", () => {
     expect(r.doc.text).toContain("Action phases and mind-sets");
   });
 
+  it("p に入らず div に直に書かれた文も塊にする（中に別の塊があっても）。<br> は空白にする", () => {
+    const html = `<html><body><main><h1>Order Effects in Belief Updating</h1>
+      <div class="abstract">Examines the belief-adjustment model, <em>which accounts for order effects</em> by an anchoring-and-adjustment process.<br>Predictions differ for step-by-step and end-of-sequence processing.<div class="meta"><p>Descriptors: Cognitive Processes</p></div></div>
+      <div><p>A normal paragraph inside a div with enough words to be kept as content here.</p></div></main></body></html>`;
+    const { blocks } = extractHtml(html, "https://eric.example.gov/?id=1");
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain("Examines the belief-adjustment model, which accounts for order effects by an anchoring-and-adjustment process. Predictions differ for step-by-step and end-of-sequence processing.");
+    expect(texts).toContain("Descriptors: Cognitive Processes");
+    expect(texts.filter((t) => t.startsWith("A normal paragraph"))).toHaveLength(1);
+  });
+
   it("<meta http-equiv=refresh> の転送を1回だけ追う（/releases/latest/ のような URL）", async () => {
     await upstreamSet({ url: "https://docs.example.com/latest/", contentType: "text/html", body: `<html><head><meta http-equiv="refresh" content="0; url=/limits"></head><body>Redirecting…</body></html>` });
     const r = await new Gateway(env).fetchDoc("https://docs.example.com/latest/");
