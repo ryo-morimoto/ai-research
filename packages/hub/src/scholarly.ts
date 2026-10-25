@@ -185,7 +185,8 @@ export function mergeWorks(epmc: Work[], crossref: Work[]): Work[] {
 export function citationLine(w: Work): string {
   const m = w.meta;
   const authors = m.authors.length > 6 ? `${m.authors.slice(0, 6).join(", ")}, et al.` : m.authors.join(", ");
-  const parts = [authors && `${authors}${m.year ? ` (${m.year})` : ""}.`, `${w.title}.`, m.venue && `${m.venue}.`, m.doi && `doi:${m.doi}`];
+  const end = (x: string) => (/[.?!。]$/.test(x) ? x : `${x}.`);
+  const parts = [authors && `${authors}${m.year ? ` (${m.year})` : ""}.`, end(w.title), m.venue && end(m.venue), m.doi && `doi:${m.doi}`];
   return parts.filter(Boolean).join(" ");
 }
 
@@ -206,6 +207,9 @@ export function abstractBlocks(abs: string, maxChars = 500): Block[] {
   return out;
 }
 
+/** 書誌の1行の順位の重み（抄録・本文より下） */
+export const BIB_WEIGHT = 0.4;
+
 /** 論文の出典と塊 */
 export function workSource(w: Work): { source: Source; blocks: Block[] } {
   const url = workUrl(w);
@@ -216,7 +220,8 @@ export function workSource(w: Work): { source: Source; blocks: Block[] } {
     locator: w.meta.doi ? `doi:${w.meta.doi}` : w.epmc ? `${w.epmc.source}:${w.epmc.id}` : url,
     work: w.meta,
   };
-  const blocks: Block[] = [{ kind: "meta", text: citationLine(w), context: "書誌" }];
+  // 書誌は出典の work にも構造で入っているので、段落としては内容（抄録）より下に並べる
+  const blocks: Block[] = [{ kind: "meta", text: citationLine(w), context: "書誌", weight: BIB_WEIGHT }];
   if (w.abstract) {
     blocks.push({ kind: "heading", text: "Abstract" });
     blocks.push(...abstractBlocks(w.abstract));

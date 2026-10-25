@@ -59,7 +59,7 @@ import { presentCutoffs, type CutoffOrigin } from "./cutoffs.ts";
  */
 
 type SourceEntry = { sourceId: string; doc: Doc; v: number };
-type ParaEntry = { passageId: string; sourceId: string; text: string; context?: string; v: number; index: number; delivered: boolean };
+type ParaEntry = { passageId: string; sourceId: string; text: string; context?: string; weight?: number; v: number; index: number; delivered: boolean };
 type HitEntry = {
   passageId: string;
   v: number;
@@ -260,6 +260,7 @@ export class RunDO extends DurableObject<Env> {
       const passageId = `p${++this.counters.passage}`;
       const e: ParaEntry = { passageId, sourceId, text: p.text, v, index: p.index, delivered: false };
       if (p.context) e.context = p.context;
+      if (p.weight !== undefined) e.weight = p.weight;
       this.paras.set(passageId, e);
       this.meta!.passageMeta[passageId] = { sourceId, url: doc.source.url, locator: doc.source.locator, v, index: p.index };
     }
@@ -488,10 +489,14 @@ export class RunDO extends DurableObject<Env> {
     const cap = caps[phase];
 
     const hitSources: Record<string, SourceRef> = {};
+    const hitSourceByUrl = new Map<string, string>();
     const hitsOut: LedgerHit[] = [...this.hits.values()]
       .filter((h) => h.v === v && h.deliveredStatus !== h.status)
       .map((h) => {
-        hitSources[h.passageId] = {
+        // 同じ URL の候補は、出典を1つにまとめる
+        const sid = hitSourceByUrl.get(h.record.url) ?? h.passageId;
+        hitSourceByUrl.set(h.record.url, sid);
+        hitSources[sid] ??= {
           kind: h.record.kind,
           url: h.record.url,
           locator: h.record.locator,
@@ -500,7 +505,7 @@ export class RunDO extends DurableObject<Env> {
         };
         const out: LedgerHit = {
           passageId: h.passageId,
-          sourceId: h.passageId,
+          sourceId: sid,
           excerpt: h.record.excerpt,
           status: h.status,
           verifiedAt: h.record.verifiedAt,
@@ -554,7 +559,7 @@ export class RunDO extends DurableObject<Env> {
       }
       seen.add(key);
       const src = this.sources.get(p.sourceId)?.doc.source;
-      const weight = src ? POLICY.tierWeight[tierOf(src)] : 1;
+      const weight = (src ? POLICY.tierWeight[tierOf(src)] : 1) * (p.weight ?? 1);
       candidates.push({ sourceId: p.sourceId, index: p.index, text: p.text, weight, passageId: p.passageId, ...(p.context ? { context: p.context } : {}) } as Paragraph & { passageId: string });
     }
     const selected = selectPassages(candidates, [m.question, ...m.queries], {

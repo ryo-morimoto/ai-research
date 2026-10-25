@@ -29,6 +29,7 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
     const [w] = mergeWorks(e, c);
     expect(w).toMatchObject({ abstract: "From EPMC.", abstractFrom: "europepmc", meta: { doi: "10.1/a", year: 2001, venue: "J", authors: ["A B", "C D"] } });
     expect(citationLine(w!)).toBe("A B, C D (2001). T. J. doi:10.1/a");
+    expect(citationLine({ meta: { authors: ["A"], year: 2000, venue: "J." }, title: "Can it be improved?" })).toBe("A (2000). Can it be improved? J.");
     expect(stripTags("<jats:sec><jats:title>Background</jats:title><jats:p>x &amp; y</jats:p></jats:sec>")).toBe("Background: x & y");
   });
 
@@ -49,6 +50,10 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
     expect(abs).toBeDefined();
     expect({ ...b.sources, ...last.sources }[abs.sourceId]).toMatchObject({ kind: "work", tier: "paper", url: "https://doi.org/10.1007/s11031-022-09977-8", work: { year: 2022, venue: "Motivation and Emotion" } });
     expect(abs.context).toBe("Abstract");
+    // 書誌の1行は、同じ論文の抄録より下に並ぶ
+    const ids = all.map((p) => p.passageId);
+    const bib = all.find((p) => p.sourceId === abs.sourceId && p.context === "書誌");
+    if (bib) expect(ids.indexOf(bib.passageId)).toBeGreaterThan(ids.indexOf(abs.passageId));
     // ウェブ検索はしていない
     const log = await upstreamLog();
     expect(log.some((l) => l.url.startsWith("https://search.test/"))).toBe(false);

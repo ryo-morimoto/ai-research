@@ -10,7 +10,8 @@ import type { Paragraph } from "./select.ts";
  */
 export type BlockKind = "prose" | "item" | "row" | "heading" | "code" | "meta" | "ref";
 
-export type Block = { kind: BlockKind; text: string; context?: string };
+/** weight は段落の順位の重み（既定 1）。論文の書誌の1行のように、内容より下に並べたい塊に付ける */
+export type Block = { kind: BlockKind; text: string; context?: string; weight?: number };
 
 export const CANDIDATE_KINDS: ReadonlySet<BlockKind> = new Set<BlockKind>(["prose", "item", "row", "meta"]);
 
@@ -28,6 +29,7 @@ export function candidateParagraphs(sourceId: string, blocks: Block[]): (Paragra
     if (!/[\p{L}\p{N}]/u.test(text)) return;
     const p: Paragraph & { context?: string } = { sourceId, index, text };
     if (b.context) p.context = b.context;
+    if (b.weight !== undefined) p.weight = b.weight;
     out.push(p);
   });
   return out;
