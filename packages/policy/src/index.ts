@@ -11,7 +11,7 @@ export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent
 
 export const POLICY = {
   name: "ai-research",
-  revision: "2026-10-24.4",
+  revision: "2026-10-25.1",
   deadlines: {
     /** 取得1件の時間上限（P-02）。頻度制限の順番待ちは含めない */
     fetchMs: 8_000,
@@ -106,6 +106,8 @@ export const POLICY = {
     toolSearchTools: ["ToolSearch"],
     /** ツール検索で ai-research が見つからなかった会話を覚えておく時間 */
     noConnectorTtlMs: 60 * 60_000,
+    /** ai-research の検索が使えなかった（検索サービスの失敗・未設定）ときに、組み込みの検索を通す時間（設計 v1.4 §8.2.4） */
+    searchDownTtlMs: 10 * 60_000,
   },
 } as const;
 
@@ -127,6 +129,18 @@ export const ROUTE_ALLOW_CONTEXT = {
   explicit: "利用者がウェブ検索を明示したので、組み込みの道具で調べます。結果には「経路外（利用者の指定）」と書き、確認済の印は付けないでください。",
   cutoff: "ai-research で取れなかった URL なので、組み込みの取得で読みます。結果には「経路外（ai-research で取れなかった）」と書き、確認済の印は付けないでください。",
   noConnector: "この会話では ai-research の道具が見つからなかったので、組み込みの道具で調べます。結果には「経路外（ai-research が使えない）」と書き、確認済の印は付けないでください。",
+  searchDown: "ai-research の検索が使えなかったので、組み込みの検索で調べます。結果には「経路外（ai-research で検索できなかった）」と書き、確認済の印は付けないでください。",
+} as const;
+
+/**
+ * 0件の束に添える次の手（設計 v1.4 §8.2.4）。経路外に出てよいのは、ai-research で取れなかった・検索できなかったときだけ
+ */
+export const EMPTY_NEXT = {
+  no_hits: "検索語を変えて research.steer を呼ぶ（論文・研究の知見なら sources: [\"scholarly\"]）。2回続けて0件なら、0件だったと利用者に伝える。",
+  search_failed: "検索が使えなかった（cutoffs を参照）。組み込みのウェブ検索で調べてよい。結果には「経路外（ai-research で検索できなかった）」と書く。",
+  all_failed: "見つけた出典をすべて取得できなかった。cutoffs の URL（urls を含む）は WebFetch で読んでよい。結果には「経路外（ai-research で取れなかった）」と書く。",
+  not_relevant: "取得した出典に、問いと関係のある段落がなかった。検索語を変えて research.steer を呼ぶ。",
+  still_running: "まだ集めている。research.next を待つ。",
 } as const;
 
 export function hostPolicy(host: string): HostPolicy {
@@ -201,7 +215,7 @@ let cachedVersion: string | undefined;
 /** 手順・方針・上限・説明文の内容ハッシュ（実行記録の procedure_version） */
 export async function procedureVersion(): Promise<string> {
   if (!cachedVersion) {
-    const h = await textHash(JSON.stringify({ POLICY, CODE_TOOL_DESCRIPTION, ROUTE_DENY_REASON, ROUTE_ALLOW_CONTEXT }));
+    const h = await textHash(JSON.stringify({ POLICY, CODE_TOOL_DESCRIPTION, ROUTE_DENY_REASON, ROUTE_ALLOW_CONTEXT, EMPTY_NEXT }));
     cachedVersion = `${POLICY.revision}+${h.slice(0, 12)}`;
   }
   return cachedVersion;

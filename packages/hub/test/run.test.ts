@@ -159,7 +159,7 @@ describe("調査の実行（RunDO）", () => {
     const b1 = await stub.start(id, { mode: "survey", question: "取得先の制限とキャッシュ", queries: ["limits", "cache"] });
     expect(b1.budget.usedTokens).toBeLessThanOrEqual(b1.budget.capTokens);
     let last = b1;
-    for (let i = 0; i < 6 && !last.done; i++) {
+    for (let i = 0; i < 6 && (i === 0 || !last.done); i++) {
       last = await stub.next(1_000);
       expect(last.budget.usedTokens).toBeLessThanOrEqual(last.budget.capTokens);
       if (last.notices.some((x) => x.kind === "budget_stopped")) break;

@@ -25,12 +25,20 @@ export type LedgerHit = {
 
 export type CutoffReason = "timeout" | "blocked" | "robots" | "policy" | "budget" | "error" | "unsupported" | "not_configured";
 
-export type Cutoff = { what: string; why: CutoffReason; detail?: string };
+/** urls：まとめた打ち切りの URL（経路外で読める。設計 v1.4 §8.2.4） */
+export type Cutoff = { what: string; why: CutoffReason; detail?: string; urls?: string[] };
+
+/** 進み具合（設計 v1.4 §8.2.4）。検索した語・見つけた候補・取得できた出典・取得できなかった出典・走っている作業の数 */
+export type Progress = { searched: number; found: number; fetched: number; failed: number; running: number };
+
+/** 0件の理由（設計 v1.4 §8.2.4）。束の状態から規則で決める */
+export type EmptyReason = "no_hits" | "search_failed" | "all_failed" | "not_relevant" | "still_running";
 
 export type Notice =
   | { kind: "budget_stopped"; phase: "first" | "continue" | "deep" }
   | { kind: "superseded"; currentVersion: number }
   | { kind: "run_not_found" }
+  | { kind: "empty"; why: EmptyReason; next: string }
   | { kind: "done" };
 
 export type Bundle = {
@@ -41,6 +49,7 @@ export type Bundle = {
   passages: Passage[];
   cutoffs: Cutoff[];
   budget: { phase: "first" | "continue" | "deep"; usedTokens: number; capTokens: number };
+  progress: Progress;
   done: boolean;
   notices: Notice[];
 };

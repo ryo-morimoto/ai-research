@@ -13,7 +13,7 @@ import type { Env } from "./env.ts";
 
 export type RouteDecision =
   | { kind: "deny"; reason: string }
-  | { kind: "allow"; why: "explicit" | "cutoff" | "noConnector"; context: string }
+  | { kind: "allow"; why: "explicit" | "cutoff" | "noConnector" | "searchDown"; context: string }
   | { kind: "pass" };
 
 type Counts = {
@@ -21,12 +21,13 @@ type Counts = {
   allowedExplicit: number;
   allowedCutoff: number;
   allowedNoConnector: number;
+  allowedSearchDown: number;
   passed: number;
   researchStarts: number;
 };
 type DayCounts = Record<string, Counts>;
 
-const zero = (): Counts => ({ denied: 0, allowedExplicit: 0, allowedCutoff: 0, allowedNoConnector: 0, passed: 0, researchStarts: 0 });
+const zero = (): Counts => ({ denied: 0, allowedExplicit: 0, allowedCutoff: 0, allowedNoConnector: 0, allowedSearchDown: 0, passed: 0, researchStarts: 0 });
 const dayOf = (ms: number) => new Date(ms + 9 * 3_600_000).toISOString().slice(0, 10); // JST の日付
 
 const EXPLICIT = POLICY.routing.explicitPatterns.map((p) => new RegExp(p, "u"));
@@ -73,6 +74,7 @@ export class RouteDO extends DurableObject<Env> {
       this.sql.exec(`CREATE TABLE IF NOT EXISTS cutoffs (url TEXT PRIMARY KEY, why TEXT NOT NULL, expires INTEGER NOT NULL)`);
       this.sql.exec(`CREATE TABLE IF NOT EXISTS counts (day TEXT PRIMARY KEY, json TEXT NOT NULL)`);
       this.sql.exec(`CREATE TABLE IF NOT EXISTS no_connector (session TEXT PRIMARY KEY, expires INTEGER NOT NULL)`);
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS search_down (id INTEGER PRIMARY KEY CHECK (id = 1), expires INTEGER NOT NULL)`);
     });
   }
 
@@ -80,6 +82,7 @@ export class RouteDO extends DurableObject<Env> {
     this.sql.exec(`DELETE FROM explicit WHERE expires <= ?`, now);
     this.sql.exec(`DELETE FROM cutoffs WHERE expires <= ?`, now);
     this.sql.exec(`DELETE FROM no_connector WHERE expires <= ?`, now);
+    this.sql.exec(`DELETE FROM search_down WHERE expires <= ?`, now);
     const n = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM explicit`).one().n;
     if (n > POLICY.routing.maxSessions) {
       this.sql.exec(`DELETE FROM explicit WHERE session IN (SELECT session FROM explicit ORDER BY expires ASC LIMIT ?)`, n - POLICY.routing.maxSessions);
@@ -132,6 +135,16 @@ export class RouteDO extends DurableObject<Env> {
       );
   }
 
+  /** RunDO から：ai-research の検索が使えなかった（検索サービスの失敗・未設定。設計 v1.4 §8.2.4） */
+  noteSearchDown(): void {
+    const now = Date.now();
+    this.prune(now);
+    this.sql.exec(
+      `INSERT INTO search_down (id, expires) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET expires = excluded.expires`,
+      now + POLICY.routing.searchDownTtlMs,
+    );
+  }
+
   noteResearchStart(): void {
     this.bump("researchStarts");
   }
@@ -155,6 +168,13 @@ export class RouteDO extends DurableObject<Env> {
       if (c) {
         this.bump("allowedCutoff", now);
         return { kind: "allow", why: "cutoff", context: ROUTE_ALLOW_CONTEXT.cutoff };
+      }
+    }
+    if (!(POLICY.routing.fetchTools as readonly string[]).includes(input.tool)) {
+      const down = this.sql.exec(`SELECT 1 FROM search_down WHERE expires > ?`, now).toArray()[0];
+      if (down) {
+        this.bump("allowedSearchDown", now);
+        return { kind: "allow", why: "searchDown", context: ROUTE_ALLOW_CONTEXT.searchDown };
       }
     }
     const nc = this.sql.exec(`SELECT 1 FROM no_connector WHERE session = ? AND expires > ?`, input.session, now).toArray()[0];

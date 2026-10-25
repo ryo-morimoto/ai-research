@@ -19,16 +19,18 @@ import {
   type Phase,
   type Source,
 } from "@ai-research/core";
-import { POLICY, procedureVersion } from "@ai-research/policy";
+import { EMPTY_NEXT, POLICY, procedureVersion } from "@ai-research/policy";
 import type {
   Mode,
   Bundle,
   ClaimInput,
   ClaimStatus,
   Cutoff,
+  EmptyReason,
   LedgerHit,
   Notice,
   Passage,
+  Progress,
   QuestionInput,
   VerifyResult,
 } from "@ai-research/sandbox-api";
@@ -65,7 +67,21 @@ type HitEntry = {
   verifiedText?: string;
   fingerprint?: Fingerprint;
 };
-type TaskEntry = { id: number; v: number; label: string; origin: CutoffOrigin; done: boolean; controller: AbortController; deep: boolean; startedAt: number };
+type TaskEntry = {
+  id: number;
+  v: number;
+  label: string;
+  origin: CutoffOrigin;
+  /** 取得の作業なら、その URL（打ち切りとして見せるときに使う） */
+  url?: string;
+  done: boolean;
+  controller: AbortController;
+  deep: boolean;
+  startedAt: number;
+};
+/** 現在の版の進み具合（設計 v1.4 §8.2.4）。searchFailed は0件の理由を決めるためだけに持つ */
+type ProgressCounts = Omit<Progress, "running"> & { searchFailed: number };
+const zeroProgress = (): ProgressCounts => ({ searched: 0, found: 0, fetched: 0, failed: 0, searchFailed: 0 });
 type CutoffEntry = { cutoff: Cutoff; origin: CutoffOrigin; v: number; delivered: boolean };
 
 type Manifest = {
@@ -99,6 +115,7 @@ type Meta = {
   passageMeta: Record<string, { sourceId: string; url: string; locator: string; v: number; index: number }>;
   /** ID の払い出しの続き。退避の後も同じ ID を使い回さないために保存する */
   counters?: { task: number; source: number; passage: number; hit: number };
+  progress?: ProgressCounts;
 };
 
 type RunEvent = { ev: number; at: number; type: string; [k: string]: unknown };
@@ -189,13 +206,14 @@ export class RunDO extends DurableObject<Env> {
   // ---- 作業 -----------------------------------------------------------------
 
   /** 作業を始める（INV-11：深掘りでなければ4分を過ぎて始めない） */
-  private spawn(v: number, label: string, origin: CutoffOrigin, fn: (signal: AbortSignal) => Promise<void>): boolean {
+  private spawn(v: number, label: string, origin: CutoffOrigin, fn: (signal: AbortSignal) => Promise<void>, url?: string): boolean {
     const m = this.meta!;
     if (m.done) return false;
     if (!m.deep && this.elapsedPolicyMs() >= deadlines(this.env).continueUntilMs) return false;
     const id = ++this.counters.task;
     const controller = new AbortController();
     const task: TaskEntry = { id, v, label, origin, done: false, controller, deep: m.deep, startedAt: Date.now() };
+    if (url) task.url = url;
     this.tasks.set(id, task);
     this.log("task_start", { id, v, label });
     fn(controller.signal)
@@ -207,9 +225,17 @@ export class RunDO extends DurableObject<Env> {
       .finally(() => {
         task.done = true;
         this.log("task_done", { id, v });
+        // 終わりは作業の状態で決める（設計 v1.4 D15）。現在の版の作業が尽きたら、それ以上は届かない
+        if (this.current(v) && this.unfinished(v).length === 0) this.finish("idle");
         this.notify();
       });
     return true;
+  }
+
+  private prog(): ProgressCounts {
+    const m = this.meta!;
+    m.progress ??= zeroProgress();
+    return m.progress;
   }
 
   private current(v: number): boolean {
@@ -221,6 +247,7 @@ export class RunDO extends DurableObject<Env> {
     if (!this.current(v)) return null;
     const sourceId = `s${++this.counters.source}`;
     this.sources.set(sourceId, { sourceId, doc, v });
+    this.prog().fetched++;
     for (const p of candidateParagraphs(sourceId, doc.blocks)) {
       const passageId = `p${++this.counters.passage}`;
       const e: ParaEntry = { passageId, sourceId, text: p.text, v, index: p.index, delivered: false };
@@ -250,12 +277,21 @@ export class RunDO extends DurableObject<Env> {
     const fetchUrl = (url: string, origin: CutoffOrigin) => {
       if (this.fetchedUrls.has(url) || this.fetchedUrls.size >= maxSources) return;
       this.fetchedUrls.add(url);
-      this.spawn(v, `取得: ${url}`, origin, async (signal) => {
-        const r = await this.gw().withSignal(signal).fetchDoc(url);
-        if (!this.current(v)) return;
-        if (r.ok && "doc" in r) this.addDoc(v, r.doc);
-        else if (!r.ok) this.addCutoff(v, r.cutoff, origin);
-      });
+      this.spawn(
+        v,
+        `取得: ${url}`,
+        origin,
+        async (signal) => {
+          const r = await this.gw().withSignal(signal).fetchDoc(url);
+          if (!this.current(v)) return;
+          if (r.ok && "doc" in r) this.addDoc(v, r.doc);
+          else if (!r.ok) {
+            this.prog().failed++;
+            this.addCutoff(v, r.cutoff, origin);
+          }
+        },
+        url,
+      );
     };
 
     // 台帳から候補を選び、照らし直す（W-03、Q-02）
@@ -281,7 +317,15 @@ export class RunDO extends DurableObject<Env> {
       this.spawn(v, `検索: ${q}`, "system", async (signal) => {
         const r = await this.gw().withSignal(signal).search(q);
         if (!this.current(v)) return;
-        if (!r.ok) return this.addCutoff(v, r.cutoff, "system");
+        const p = this.prog();
+        p.searched++;
+        if (!r.ok) {
+          p.searchFailed++;
+          // ai-research の検索が使えないときは、組み込みの検索を通す（設計 v1.4 §8.2.4）
+          if (!signal.aborted) this.ctx.waitUntil(routeStub(this.env).noteSearchDown().catch(() => {}));
+          return this.addCutoff(v, r.cutoff, "system");
+        }
+        p.found += r.hits.length;
         for (const h of r.hits) fetchUrl(h.url, "search");
       });
     }
@@ -407,7 +451,7 @@ export class RunDO extends DurableObject<Env> {
     const running = this.unfinished(v).map((t) => ({
       origin: t.origin,
       cutoff: {
-        what: t.label,
+        what: t.url ?? t.label,
         why: "timeout",
         detail: m.done ? "締め切りで打ち切った" : "締め切りまでに終わらず、続けて集めている",
       } as Cutoff,
@@ -425,9 +469,11 @@ export class RunDO extends DurableObject<Env> {
       passages: [],
       cutoffs,
       budget: { phase, usedTokens: m.budget.used, capTokens: cap },
+      progress: this.progressNow(v),
       done: m.done,
       notices,
     };
+    const deliveredBefore = (this.shownTexts.get(v)?.size ?? 0) > 0 || [...this.hits.values()].some((h) => h.v === v && h.deliveredStatus !== null);
 
     // 予算の残りに収まるように段落を選ぶ（INV-9）
     const remaining = Math.max(0, cap - m.budget.used - estimateJsonTokens(base));
@@ -476,6 +522,10 @@ export class RunDO extends DurableObject<Env> {
     }
     bundle.budget = { phase, usedTokens: m.budget.used, capTokens: cap };
     if (m.done) notices.push({ kind: "done" });
+    if (!deliveredBefore && bundle.passages.length === 0 && bundle.ledgerHits.length === 0) {
+      const why = this.emptyReason(bundle.progress);
+      notices.push({ kind: "empty", why, next: EMPTY_NEXT[why] });
+    }
 
     // 届けた印を付ける
     for (const p of bundle.passages) {
@@ -503,6 +553,24 @@ export class RunDO extends DurableObject<Env> {
       cap,
     });
     return bundle;
+  }
+
+  private progressNow(v: number): Progress {
+    const { searched, found, fetched, failed } = this.prog();
+    return { searched, found, fetched, failed, running: this.unfinished(v).length };
+  }
+
+  /** 0件の理由（設計 v1.4 §8.2.4）。束の状態から規則で決める */
+  private emptyReason(p: Progress): EmptyReason {
+    const m = this.meta!;
+    if (!m.done && p.running > 0) return "still_running";
+    const sf = this.prog().searchFailed;
+    // 締め切りで打ち切った取得は、取得できなかったものに数える
+    const failed = p.failed + p.running;
+    if (p.fetched === 0 && failed > 0) return "all_failed";
+    if (p.fetched === 0 && sf > 0 && sf >= p.searched) return "search_failed";
+    if (p.fetched === 0) return "no_hits";
+    return "not_relevant";
   }
 
   private async manifestFor(runId: string, input: QuestionInput, client?: string): Promise<Manifest> {
@@ -561,7 +629,7 @@ export class RunDO extends DurableObject<Env> {
     await this.waitUntil(() => !this.current(v) || this.unfinished(v).length === 0, mode.startMs);
     // 続きを集めない種類（lookup）は、最初の束で終える。残りの作業は止める（設計 v1.3 §8.1.2）
     const ends = !mode.continues && !m.deep;
-    if (ends) this.finish();
+    if (ends) this.finish("lookup");
     const b = this.buildBundle();
     if (ends) this.abortAll();
     if (!m.firstReturned) {
@@ -600,6 +668,7 @@ export class RunDO extends DurableObject<Env> {
     m.question = question;
     m.queries = queries;
     m.urls = urls;
+    m.progress = zeroProgress();
     if (m.done) m.done = false;
     // 古い版の作業を止める。終わっても結果には混ぜない（INV-10）
     for (const t of this.tasks.values()) if (t.v === old && !t.done) t.controller.abort();
@@ -711,11 +780,11 @@ export class RunDO extends DurableObject<Env> {
   }
 
   /** 4分の上限：残りの作業を止めて終える（W-04） */
-  private finish(): void {
+  private finish(why: "idle" | "limit" | "close" | "lookup" = "limit"): void {
     const m = this.meta!;
     if (m.done) return;
     m.done = true;
-    this.log("finish", { v: m.version, unfinished: this.unfinished(m.version).map((t) => t.id) });
+    this.log("finish", { v: m.version, why, unfinished: this.unfinished(m.version).map((t) => t.id) });
     this.notify();
   }
 
@@ -735,7 +804,7 @@ export class RunDO extends DurableObject<Env> {
   async close(): Promise<boolean> {
     const m = await this.load();
     if (!m) return false;
-    this.finish();
+    this.finish("close");
     this.abortAll();
     this.log("close", { v: m.version });
     await this.save();
@@ -751,6 +820,7 @@ export class RunDO extends DurableObject<Env> {
       passages: [],
       cutoffs: [],
       budget: { phase: "first" as Phase, usedTokens: 0, capTokens: 0 },
+      progress: { searched: 0, found: 0, fetched: 0, failed: 0, running: 0 },
       done: true,
       notices: [notice],
     };
