@@ -34,6 +34,7 @@ import type {
   Passage,
   Progress,
   QuestionInput,
+  SourceRef,
   SourceSet,
   VerifyResult,
 } from "@ai-research/sandbox-api";
@@ -464,10 +465,16 @@ export class RunDO extends DurableObject<Env> {
     );
   }
 
-  private toPassage(p: ParaEntry): Passage {
-    const s = this.sources.get(p.sourceId);
-    const src: Source = s?.doc.source ?? { kind: "web", url: this.meta!.passageMeta[p.passageId]?.url ?? "", locator: "" };
-    const out: Passage = { passageId: p.passageId, text: p.text, source: { ...src, tier: tierOf(src) } };
+  private sourceRef(sourceId: string, passageId: string): SourceRef {
+    const s = this.sources.get(sourceId);
+    const src: Source = s?.doc.source ?? { kind: "web", url: this.meta!.passageMeta[passageId]?.url ?? "", locator: "" };
+    return { ...src, tier: tierOf(src) } as SourceRef;
+  }
+
+  /** 段落と、その出典（束の sources に1回だけ置く。設計 v1.4 §8.2.7） */
+  private toPassage(p: ParaEntry, sources: Record<string, SourceRef>): Passage {
+    sources[p.sourceId] ??= this.sourceRef(p.sourceId, p.passageId);
+    const out: Passage = { passageId: p.passageId, sourceId: p.sourceId, text: p.text };
     if (p.context) out.context = p.context;
     return out;
   }
@@ -480,20 +487,21 @@ export class RunDO extends DurableObject<Env> {
     const caps = this.caps();
     const cap = caps[phase];
 
+    const hitSources: Record<string, SourceRef> = {};
     const hitsOut: LedgerHit[] = [...this.hits.values()]
       .filter((h) => h.v === v && h.deliveredStatus !== h.status)
       .map((h) => {
+        hitSources[h.passageId] = {
+          kind: h.record.kind,
+          url: h.record.url,
+          locator: h.record.locator,
+          tier: tierOf(h.record),
+          ...(h.record.title ? { title: h.record.title } : {}),
+        };
         const out: LedgerHit = {
           passageId: h.passageId,
-          recordId: h.record.recordId,
+          sourceId: h.passageId,
           excerpt: h.record.excerpt,
-          source: {
-            kind: h.record.kind,
-            url: h.record.url,
-            locator: h.record.locator,
-            tier: tierOf(h.record),
-            ...(h.record.title ? { title: h.record.title } : {}),
-          },
           status: h.status,
           verifiedAt: h.record.verifiedAt,
         };
@@ -519,10 +527,10 @@ export class RunDO extends DurableObject<Env> {
       runId: m.runId,
       mode: m.mode,
       question: { version: v, text: m.question },
+      sources: { ...hitSources },
       ledgerHits: hitsOut,
       passages: [],
       cutoffs,
-      budget: { phase, usedTokens: m.budget.used, capTokens: cap },
       progress: this.progressNow(v),
       done: m.done,
       notices,
@@ -558,27 +566,27 @@ export class RunDO extends DurableObject<Env> {
       minCoverage: POLICY.relevance.minCoverage,
     });
     const byKey = new Map(candidates.map((c) => [`${c.sourceId}#${c.index}`, c as Paragraph & { passageId: string }]));
-    let passages: Passage[] = selected.map((s) => {
-      const para = this.paras.get(byKey.get(`${s.sourceId}#${s.index}`)!.passageId)!;
-      return { ...this.toPassage(para), text: s.text };
-    });
-
-    let bundle: Bundle = { ...base, passages };
+    const paraOf = (s: { sourceId: string; index: number }) => this.paras.get(byKey.get(`${s.sourceId}#${s.index}`)!.passageId)!;
+    let chosen = selected;
+    const assemble = (list: typeof selected): Bundle => {
+      const sources = { ...hitSources };
+      const passages = list.map((s) => ({ ...this.toPassage(paraOf(s), sources), text: s.text }));
+      return { ...base, sources, passages };
+    };
+    let bundle = assemble(chosen);
     let want = estimateJsonTokens(bundle);
     let a = admit(m.budget, want, caps);
-    while (a.allowed < want && passages.length > 0) {
-      passages = passages.slice(0, -1);
-      bundle = { ...base, passages };
+    while (a.allowed < want && chosen.length > 0) {
+      chosen = chosen.slice(0, -1);
+      bundle = assemble(chosen);
       want = estimateJsonTokens(bundle);
       a = admit(m.budget, want, caps);
     }
     m.budget = a.state;
     if (a.stop) {
       notices.push({ kind: "budget_stopped", phase });
-      if (a.allowed < want) bundle = { ...base, passages: [], ledgerHits: [] };
+      if (a.allowed < want) bundle = { ...base, sources: {}, passages: [], ledgerHits: [] };
     }
-    bundle.budget = { phase, usedTokens: m.budget.used, capTokens: cap };
-    if (m.done) notices.push({ kind: "done" });
     if (!deliveredBefore && bundle.passages.length === 0 && bundle.ledgerHits.length === 0) {
       const why = this.emptyReason(bundle.progress);
       notices.push({ kind: "empty", why, next: EMPTY_NEXT[why] });
@@ -755,21 +763,22 @@ export class RunDO extends DurableObject<Env> {
    */
   async around(passageId: string, before = 1, after = 1): Promise<AroundResult> {
     const m = await this.load();
-    if (!m) return { passages: [], cutoffs: [], notices: [{ kind: "run_not_found" }] };
+    const none = (n: Partial<AroundResult>): AroundResult => ({ sources: {}, passages: [], cutoffs: [], notices: [], ...n });
+    if (!m) return none({ notices: [{ kind: "run_not_found" }] });
     const pm = m.passageMeta[passageId];
-    if (!pm) return { passages: [], cutoffs: [], notices: [{ kind: "passage_not_found", passageId }] };
-    if (pm.v !== m.version) return { passages: [], cutoffs: [], notices: [{ kind: "superseded", currentVersion: m.version }] };
+    if (!pm) return none({ notices: [{ kind: "passage_not_found", passageId }] });
+    if (pm.v !== m.version) return none({ notices: [{ kind: "superseded", currentVersion: m.version }] });
     let src = this.sources.get(pm.sourceId);
     if (!src) {
       const r = await this.gw().fetchDoc(pm.url);
-      if (!r.ok) return { passages: [], cutoffs: [r.cutoff], notices: [] };
-      if (!("doc" in r)) return { passages: [], cutoffs: [], notices: [{ kind: "passage_not_found", passageId }] };
+      if (!r.ok) return none({ cutoffs: [r.cutoff] });
+      if (!("doc" in r)) return none({ notices: [{ kind: "passage_not_found", passageId }] });
       src = { sourceId: pm.sourceId, doc: r.doc, v: m.version };
       this.sources.set(pm.sourceId, src);
     }
     const cands = candidateParagraphs(pm.sourceId, src.doc.blocks);
     const pos = cands.findIndex((c) => c.index === pm.index);
-    if (pos < 0) return { passages: [], cutoffs: [], notices: [{ kind: "passage_not_found", passageId }] };
+    if (pos < 0) return none({ notices: [{ kind: "passage_not_found", passageId }] });
     const k = POLICY.around.maxEach;
     const b = Math.min(k, Math.max(0, Math.floor(before)));
     const a = Math.min(k, Math.max(0, Math.floor(after)));
@@ -777,6 +786,7 @@ export class RunDO extends DurableObject<Env> {
     this.shownTexts.set(m.version, shown);
     const query = [m.question, ...m.queries];
     const passages: Passage[] = [];
+    const sources: Record<string, SourceRef> = {};
     for (const c of cands.slice(Math.max(0, pos - b), pos + a + 1)) {
       let e = [...this.paras.values()].find((p) => p.v === m.version && p.sourceId === pm.sourceId && p.index === c.index);
       if (!e) {
@@ -789,10 +799,10 @@ export class RunDO extends DurableObject<Env> {
       }
       e.delivered = true;
       shown.add(normalize(e.text));
-      passages.push({ ...this.toPassage(e), text: clip(e.text, query, POLICY.around.maxChars) });
+      passages.push({ ...this.toPassage(e, sources), text: clip(e.text, query, POLICY.around.maxChars) });
     }
     const notices: Notice[] = [];
-    const want = estimateJsonTokens(passages);
+    const want = estimateJsonTokens({ sources, passages });
     const adm = admit(m.budget, want, this.caps());
     m.budget = adm.state;
     if (adm.allowed < want) {
@@ -801,7 +811,7 @@ export class RunDO extends DurableObject<Env> {
     }
     this.log("around", { v: m.version, passageId, n: passages.length });
     await this.save();
-    return { passages, cutoffs: [], notices };
+    return { sources: passages.length ? sources : {}, passages, cutoffs: [], notices };
   }
 
   /** 主張を照合する。照合できた引用だけを台帳に追記する（INV-1、INV-5） */
@@ -932,10 +942,10 @@ export class RunDO extends DurableObject<Env> {
       runId,
       mode: "survey",
       question: { version: 0, text: "" },
+      sources: {},
       ledgerHits: [],
       passages: [],
       cutoffs: [],
-      budget: { phase: "first" as Phase, usedTokens: 0, capTokens: 0 },
       progress: { searched: 0, found: 0, fetched: 0, failed: 0, running: 0 },
       done: true,
       notices: [notice],

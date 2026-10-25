@@ -1,6 +1,6 @@
 ---
 name: ai-research-first
-description: 調べもの・事実確認・最新情報や仕様や料金の確認・URL の中身の確認をするとき、頼まれていなくても WebSearch / WebFetch / web_search / web_fetch より先に、ai-research コネクタの code で調べる。
+description: 調べもの・事実確認・論文や研究の知見と数値の確認・最新情報や仕様や料金の確認・URL の中身の確認をするとき（記憶で答えられそうでも）、頼まれていなくても WebSearch / WebFetch / web_search / web_fetch より先に、ai-research コネクタの code で調べる。
 ---
 
 # 調べものは ai-research を通す

@@ -47,7 +47,7 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
     const all = [...b.passages, ...last.passages];
     const abs = all.find((p) => p.text.includes("open-minded processing"))!;
     expect(abs).toBeDefined();
-    expect(abs.source).toMatchObject({ kind: "work", tier: "paper", url: "https://doi.org/10.1007/s11031-022-09977-8", work: { year: 2022, venue: "Motivation and Emotion" } });
+    expect({ ...b.sources, ...last.sources }[abs.sourceId]).toMatchObject({ kind: "work", tier: "paper", url: "https://doi.org/10.1007/s11031-022-09977-8", work: { year: 2022, venue: "Motivation and Emotion" } });
     expect(abs.context).toBe("Abstract");
     // ウェブ検索はしていない
     const log = await upstreamLog();
@@ -69,7 +69,7 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
     const b = await stub.start(id, { mode: "lookup", question: "Kluger DeNisi feedback interventions performance d", urls: [url] });
     const p = b.passages.find((x) => x.text.includes("d = .41"))!;
     expect(p).toBeDefined();
-    expect(p.source).toMatchObject({ kind: "work", url: "https://doi.org/10.1037/0033-2909.119.2.254", work: { year: 1996, venue: "Psychological Bulletin" } });
+    expect(b.sources[p.sourceId]).toMatchObject({ kind: "work", url: "https://doi.org/10.1037/0033-2909.119.2.254", work: { year: 1996, venue: "Psychological Bulletin" } });
     expect(b.notices.some((n) => n.kind === "empty")).toBe(false);
     await new Promise((r) => setTimeout(r, 50));
     expect(await routeStub(env).decide({ session: "s", tool: "WebFetch", url })).toMatchObject({ kind: "allow", why: "cutoff" });

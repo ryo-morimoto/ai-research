@@ -22,14 +22,16 @@ export type SourceRef = {
 /** 探す先（設計 v1.4 §8.2.2）。scholarly は書誌・抄録の API（Europe PMC、Crossref） */
 export type SourceSet = "web" | "scholarly";
 
-/** context は見出し・表の見出し行（照合の対象外）。照合で引用するのは text だけ */
-export type Passage = { passageId: string; text: string; context?: string; source: SourceRef };
+/**
+ * context は見出し・導入の文・表の見出し行（照合の対象外）。照合で引用するのは text だけ。
+ * 出典は束の sources に1回だけ置き、sourceId で指す（設計 v1.4 §8.2.7）
+ */
+export type Passage = { passageId: string; sourceId: string; text: string; context?: string };
 
 export type LedgerHit = {
   passageId: string;
-  recordId: string;
+  sourceId: string;
   excerpt: string;
-  source: SourceRef;
   /** 引用確認済：照らし直して原文にあった。照合失敗：原文が変わり抜き書きがない。取得できず未照合：取り直せなかった（設計 v1.4 §8.2.6） */
   status: "引用確認済" | "照合中" | "照合失敗" | "取得できず未照合";
   reason?: string;
@@ -53,17 +55,17 @@ export type Notice =
   | { kind: "superseded"; currentVersion: number }
   | { kind: "run_not_found" }
   | { kind: "empty"; why: EmptyReason; next: string }
-  | { kind: "passage_not_found"; passageId: string }
-  | { kind: "done" };
+  | { kind: "passage_not_found"; passageId: string };
 
+/** 束（設計 v1.4 §8.2.7）。予算は止めたときの通知（budget_stopped）だけで示す */
 export type Bundle = {
   runId: string;
   mode: Mode;
   question: { version: number; text: string };
+  sources: Record<string, SourceRef>;
   ledgerHits: LedgerHit[];
   passages: Passage[];
   cutoffs: Cutoff[];
-  budget: { phase: "first" | "continue" | "deep"; usedTokens: number; capTokens: number };
   progress: Progress;
   done: boolean;
   notices: Notice[];
@@ -106,7 +108,7 @@ export type ClaimStatus = {
 export type VerifyResult = { statuses: ClaimStatus[]; notices: Notice[] };
 
 /** 段落の前後（設計 v1.4 §8.2.5）。前後の候補の塊を、照合できる段落として返す */
-export type AroundResult = { passages: Passage[]; cutoffs: Cutoff[]; notices: Notice[] };
+export type AroundResult = { sources: Record<string, SourceRef>; passages: Passage[]; cutoffs: Cutoff[]; notices: Notice[] };
 
 /**
  * 実行環境に渡す関数の失敗（設計 v1.3 D12、制約 P-05）。例外ではなく値で返す。
@@ -120,21 +122,25 @@ export type HubError = { error: { code: HubErrorCode; retryable: boolean; messag
 
 /** モデルが読む型定義。道具の説明文に埋め込む */
 export const SANDBOX_TYPES = `
-type Source = { kind: "web" | "github" | "arxiv"; url: string; title?: string; locator: string };
-type Passage = { passageId: string; text: string; context?: string; source: Source };  // context は見出し（引用しない）
-type LedgerHit = { passageId: string; excerpt: string; source: Source; status: "確認済" | "照合中" | "未確認"; verifiedAt: string };
-type Bundle = { runId: string; mode: "lookup" | "survey"; question: { version: number; text: string };
-  ledgerHits: LedgerHit[]; passages: Passage[]; cutoffs: { what: string; why: string; detail?: string }[]; done: boolean };
-type Claim = { text: string; cite: { passageId: string; quote: string }[] };  // quote は段落の text をそのまま
-type HubError = { error: { code: "busy" | "run_not_found" | "bad_input" | "internal"; retryable: boolean; message: string; next: string } };
+type Source = { kind: "web" | "github" | "arxiv" | "work"; url: string; title?: string; locator: string;
+  tier: "paper" | "official" | "encyclopedia" | "other"; work?: { authors: string[]; year?: number; venue?: string; doi?: string } };
+type Passage = { passageId: string; sourceId: string; text: string; context?: string };  // context は見出し（引用しない）
+type LedgerHit = { passageId: string; sourceId: string; excerpt: string; status: "引用確認済" | "照合中" | "照合失敗" | "取得できず未照合"; verifiedAt: string };
+type Bundle = { runId: string; sources: Record<string, Source>; ledgerHits: LedgerHit[]; passages: Passage[];
+  cutoffs: { what: string; why: string; detail?: string; urls?: string[] }[];
+  progress: Record<"searched" | "found" | "fetched" | "failed" | "running", number>;
+  done: boolean; notices: { kind: string; why?: string; next?: string }[] };
+type Claim = { text: string; cite: { passageId: string; quote: string }[] };
+type Status = { index: number; status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合"; reason?: string; nearest?: { text: string; score: number } };
+type HubError = { error: { code: string; retryable: boolean; message: string; next: string } };
+type Q = { question: string; queries?: string[]; urls?: string[]; sources?: ("web" | "scholarly")[] };
 
 declare const research: {
-  start(q: { question: string; mode: "lookup" | "survey"; queries?: string[]; urls?: string[] }): Promise<Bundle | HubError>;
-  next(runId: string, opts?: { waitMs?: number }): Promise<Bundle | HubError>;   // survey の続き（差分だけ）
-  verify(runId: string, claims: Claim[]): Promise<{ statuses: { index: number; status: "確認済" | "確認済（表記差あり）" | "未確認"; reason?: string }[] } | HubError>;
-  steer(runId: string, q: { question: string; queries?: string[]; urls?: string[] }): Promise<Bundle | HubError>;
+  start(q: Q & { mode: "lookup" | "survey" }): Promise<Bundle | HubError>;
+  next(runId: string, opts?: { waitMs?: number }): Promise<Bundle | HubError>;
+  around(runId: string, passageId: string, opts?: { before?: number; after?: number }): Promise<{ sources; passages: Passage[] } | HubError>;
+  verify(runId: string, claims: Claim[]): Promise<{ statuses: Status[] } | HubError>;
+  steer(runId: string, q: Q): Promise<Bundle | HubError>;
   deepen(runId: string): Promise<Bundle | HubError>;
-  close(runId: string): Promise<{ closed: true } | HubError>;
 };
-declare const ledger: { search(text: string): Promise<{ excerpt: string; source: Source; verifiedAt: string }[]> };
 `.trim();

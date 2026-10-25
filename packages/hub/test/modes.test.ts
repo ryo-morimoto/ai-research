@@ -35,7 +35,7 @@ describe("依頼の種類（設計 v1.3 D9、制約 S-06・U-04）", () => {
     expect(b.done).toBe(true);
     expect(b.passages.length).toBeGreaterThan(0);
     expect(b.passages.length).toBeLessThanOrEqual(POLICY.modes.lookup.passagesPerBundle);
-    expect(b.passages.every((p) => p.source.url === "https://docs.example.com/limits")).toBe(true);
+    expect(b.passages.every((p) => b.sources[p.sourceId]?.url === "https://docs.example.com/limits")).toBe(true);
     expect((await upstreamLog()).some((l) => l.url.startsWith("https://search.test/"))).toBe(false);
     const { tasks, events } = await inspect(stub);
     await sleep(50);

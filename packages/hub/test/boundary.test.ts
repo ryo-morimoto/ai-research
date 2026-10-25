@@ -50,3 +50,18 @@ describe("実行環境との境界（P-05、設計 v1.3 D12）", () => {
     expect(classify(new Error("Network connection lost."))).toBe("busy");
   });
 });
+
+import { CODE_TOOL_DESCRIPTION, ROUTE_DENY_REASON } from "@ai-research/policy";
+import { StartInput as StartSchema } from "../src/boundary.ts";
+
+describe("説明文の例は API の型に合う（設計 v1.4。例と型がずれて bad_input になったことの再発防止）", () => {
+  it("research.start の例は、すべて StartInput として読める", () => {
+    const examples = [...`${CODE_TOOL_DESCRIPTION}\n${ROUTE_DENY_REASON}`.matchAll(/research\.start\((\{[^\n]*?\})\)/g)].map((m) => m[1]!);
+    expect(examples.length).toBeGreaterThanOrEqual(3);
+    for (const src of examples) {
+      const value = new Function(`return (${src.replaceAll("…", "x")});`)() as unknown;
+      const r = StartSchema.safeParse(value);
+      expect(r.success, src).toBe(true);
+    }
+  });
+});

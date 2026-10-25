@@ -150,9 +150,9 @@ research.around(runId, passageId, opts?: { before?: number; after?: number }): P
 research.verify(runId, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<VerifyResult | HubError>;
 research.steer(runId, q: { question: string; queries?: string[]; urls?: string[]; sources?: ("web" | "scholarly")[] }): Promise<Bundle | HubError>;
 research.deepen(runId): Promise<Bundle | HubError>;   // 利用者が求めたとき（「徹底的に」「網羅的に」を含む。W-04）
-research.close(runId): Promise<{ closed: true } | HubError>;   // 作業が残っているうちに止めたいときだけ
+research.close(runId): Promise<{ closed: true } | HubError>;   // 作業が残っているうちに止めたいときだけ（説明文には載せない）
 
-ledger.search(text: string): Promise<LedgerHit[]>;
+ledger.search(text: string): Promise<LedgerHit[]>;   // 束の ledgerHits と重なるので、説明文には載せない
 
 type Tier = "paper" | "official" | "encyclopedia" | "other";   // 出典の種類（D13）
 type Source = { kind: "web" | "github" | "arxiv" | "work"; url: string; title?: string; locator: string; tier: Tier;
@@ -469,7 +469,7 @@ PreToolUse の判断の規則（上から順に）：
 | 手順・API・結果の書き方 | code の道具の説明文 | スキルの本文は「code の道具の説明文に従う」だけ。サーバーの説明文は2行 |
 | 経路外の書き方 | フックが返す文（その場で必要なときだけ届く） | code の道具の説明文に1行 |
 
-- 結果の書き方は短くする。確認状態は出典の後ろに「（確認済、出典、確かめた日）」の形で付ける。解釈した問いは会話から補ったときだけ（Q-06）。打ち切りは答えに影響したものだけ（Q-04）。
+- 結果の書き方は短くする。確認状態は出典の後ろに「（確認済、出典、確かめた日）」の形で付ける（v1.4 で「（引用確認済・種類、出典、確かめた日）」に改めた。§8.2.6）。解釈した問いは会話から補ったときだけ（Q-06）。打ち切りは答えに影響したものだけ（Q-04）。
 - 説明の大きさは試験で上限を守る（code の道具の説明文、サーバーの説明文、スキルの本文）。書き足すたびに大きくなる流れを構造で止める。
 
 #### 8.1.6 変更の前後の計測（2026-10-24）
@@ -597,6 +597,8 @@ PreToolUse の判断の規則（上から順に）：
 - `budget` は束から外す（止めたときの `budget_stopped` の通知だけにする）。`done` の通知も外す（`done` の値と重なる）。
 - 並べて呼ぶ：`research.start` は調査ごとに別の RunDO で動くので、`Promise.all` で並べて呼んでよい。取得先ごとの頻度制限は HostLimiterDO が全体で守る。「一括で始める」関数は足さない（`Promise.all` がそれに当たる。Subtract Before You Add）。
 - 調査の管理：終わりを作業の状態で決めるので（§8.2.4）、閉じ忘れても作業は残らない。調査の一覧の道具は足さない。
+- 説明文から外したもの：`close`（ほとんどの調査で要らなくなった）と `ledger.search`（束の `ledgerHits` と重なる）。関数は残す。API が増えた分（`around`、`sources`、照合の状態、進み具合）は、説明文の重なりを削って、上限（1,200 トークン）の中に収めた（1,195）。
+- 説明文の例（`research.start({...})`）が型に合うことを試験で確かめる。v1.3 では、フックが止めるときの文の例に `mode` がなく、そのまま書くと `bad_input` になっていた
 
 #### 8.2.8 拠り所にした原則（pstack）
 
