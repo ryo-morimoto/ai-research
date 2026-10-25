@@ -33,6 +33,9 @@ export const POLICY = {
     { pattern: "arxiv.org", minIntervalMs: 1_000, maxConcurrent: 1 },
     { pattern: "api.github.com", minIntervalMs: 100, maxConcurrent: 4 },
     { pattern: "raw.githubusercontent.com", minIntervalMs: 200, maxConcurrent: 4 },
+    // 書誌・抄録の API（設計 v1.4 §8.2.2）。Europe PMC は公表値がないので 1秒に5回、Crossref は同時に1つ
+    { pattern: "www.ebi.ac.uk", minIntervalMs: 200, maxConcurrent: 2 },
+    { pattern: "api.crossref.org", minIntervalMs: 250, maxConcurrent: 1 },
   ] satisfies HostPolicy[],
   defaultHost: { pattern: "*", minIntervalMs: 1_000, maxConcurrent: 2 } satisfies HostPolicy,
   leaseTtlMs: 60_000,
@@ -96,6 +99,11 @@ export const POLICY = {
   /** 関連の絶対の下限（問いの語の被覆率。設計 v1.4 §8.2.3）。段落と台帳で同じ値 */
   relevance: { minCoverage: 0.34 },
   search: { resultsPerQuery: 5, maxSourcesPerRun: 8 },
+  /**
+   * 論文の検索（設計 v1.4 §8.2.2）。検索語の上限、1つの検索語で引く件数、1回の調査で足す論文の上限。
+   * openAccessPages：公開の版（PMC）がある論文は、survey でその本文のページも読む
+   */
+  scholarly: { queriesMax: 3, perQuery: 5, maxWorks: 12, openAccessPages: 2 },
   /**
    * 依頼の種類（設計 v1.3 D9、§8.1.2）。種類から、返す量・取得の範囲・締め切り・続きの有無を決める。
    * startMs は最初の束の締め切り（W-01）

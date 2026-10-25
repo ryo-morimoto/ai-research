@@ -62,12 +62,92 @@ DEFAULTS.set("https://arxiv.org/html/2401.00001v2", {
   body: html("Trace validation", ["Trace validation checks whether executions of a program are consistent with a TLA+ specification."]),
 });
 
+// 書誌・抄録の API（設計 v1.4 §8.2.2）。検索の語は見ないので、同じ一覧を返す
+const KD_DOI = "10.1037/0033-2909.119.2.254";
+const MS_DOI = "10.1007/s11031-022-09977-8";
+DEFAULTS.set("https://www.ebi.ac.uk/europepmc/webservices/rest/search", {
+  contentType: "application/json",
+  body: JSON.stringify({
+    version: "6.9",
+    resultList: {
+      result: [
+        {
+          id: "36160472",
+          source: "MED",
+          pmid: "36160472",
+          pmcid: "PMC9486774",
+          doi: MS_DOI,
+          title: "Deliberative and implemental mindsets in goal pursuit.",
+          authorString: "Keller L, Gollwitzer PM.",
+          pubYear: "2022",
+          journalInfo: { journal: { title: "Motivation and Emotion" } },
+          abstractText:
+            "<h4>Background</h4>Mindset theory distinguishes a deliberative mindset from an implemental mindset. The deliberative mindset is characterized by open-minded processing of information. The implemental mindset is characterized by closed-minded processing and optimistic beliefs about control.",
+          isOpenAccess: "Y",
+        },
+        {
+          id: "99999999",
+          source: "MED",
+          pmid: "99999999",
+          doi: KD_DOI,
+          title: "The effects of feedback interventions on performance.",
+          authorString: "Kluger AN, DeNisi A.",
+          pubYear: "1996",
+          journalInfo: { journal: { title: "Psychological Bulletin" } },
+          isOpenAccess: "N",
+        },
+      ],
+    },
+  }),
+});
+DEFAULTS.set("https://api.crossref.org/works", {
+  contentType: "application/json",
+  body: JSON.stringify({
+    message: {
+      items: [
+        {
+          DOI: KD_DOI.toUpperCase(),
+          title: ["The effects of feedback interventions on performance: A historical review, a meta-analysis, and a preliminary feedback intervention theory."],
+          author: [{ given: "Avraham N.", family: "Kluger" }, { given: "Angelo", family: "DeNisi" }],
+          issued: { "date-parts": [[1996]] },
+          "container-title": ["Psychological Bulletin"],
+          abstract: "<jats:p>Feedback interventions improved performance on average (d = .41), but over one-third of the feedback interventions decreased performance.</jats:p>",
+          type: "journal-article",
+        },
+        { DOI: "10.1037/e512142015-001", title: ["Mindsets dataset"], type: "dataset" },
+      ],
+    },
+  }),
+});
+DEFAULTS.set(`https://api.crossref.org/works/${KD_DOI}`, {
+  contentType: "application/json",
+  body: JSON.stringify({
+    message: {
+      DOI: KD_DOI,
+      title: ["The effects of feedback interventions on performance: A historical review, a meta-analysis, and a preliminary feedback intervention theory."],
+      author: [{ given: "Avraham N.", family: "Kluger" }, { given: "Angelo", family: "DeNisi" }],
+      issued: { "date-parts": [[1996]] },
+      "container-title": ["Psychological Bulletin"],
+      abstract: "<jats:p>Feedback interventions improved performance on average (d = .41), but over one-third of the feedback interventions decreased performance.</jats:p>",
+      type: "journal-article",
+    },
+  }),
+});
+DEFAULTS.set(`https://psycnet.apa.org/doi/${KD_DOI}`, { status: 403, body: "forbidden" });
+DEFAULTS.set("https://pmc.ncbi.nlm.nih.gov/articles/PMC9486774/", {
+  contentType: "text/html",
+  body: html("Deliberative and implemental mindsets in goal pursuit", [
+    "In the full text, participants in a deliberative mindset estimated their control over outcomes more accurately than participants in an implemental mindset.",
+  ]),
+});
+
 const SEARCH = {
   limits: ["https://docs.example.com/limits", "https://www.youtube.com/watch?v=x", "https://blocked.example.com/page"],
   cache: ["https://docs.example.com/cache"],
   slow: ["https://slow.example.com/page", "https://docs.example.com/limits"],
   injection: ["https://injection.example.com/page"],
   robots: ["https://robots.example.com/private/page", "https://robots.example.com/public/page"],
+  feedback: [`https://psycnet.apa.org/doi/${KD_DOI}`],
 };
 
 function keyFor(url) {

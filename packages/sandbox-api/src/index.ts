@@ -5,10 +5,22 @@
  * - SANDBOX_TYPES：道具の説明文に埋め込む型定義の文字列（モデルが読む）
  */
 
-export type SourceKind = "web" | "github" | "arxiv";
+export type SourceKind = "web" | "github" | "arxiv" | "work";
+export type WorkMeta = { authors: string[]; year?: number; venue?: string; doi?: string; pmid?: string; pmcid?: string };
 
 /** tier は出典の種類（設計 v1.4 D13）：paper（論文）・official（公式）・encyclopedia（百科事典）・other */
-export type SourceRef = { kind: SourceKind; url: string; title?: string; locator: string; tier?: "paper" | "official" | "encyclopedia" | "other" };
+export type SourceRef = {
+  kind: SourceKind;
+  url: string;
+  title?: string;
+  locator: string;
+  tier?: "paper" | "official" | "encyclopedia" | "other";
+  /** 論文の書誌（kind が work のとき。設計 v1.4 §8.2.2） */
+  work?: WorkMeta;
+};
+
+/** 探す先（設計 v1.4 §8.2.2）。scholarly は書誌・抄録の API（Europe PMC、Crossref） */
+export type SourceSet = "web" | "scholarly";
 
 /** context は見出し・表の見出し行（照合の対象外）。照合で引用するのは text だけ */
 export type Passage = { passageId: string; text: string; context?: string; source: SourceRef };
@@ -63,6 +75,8 @@ export type Mode = "lookup" | "survey";
 export type QuestionInput = {
   question: string;
   mode: Mode;
+  /** 既定は ["web"]。論文・研究の知見は "scholarly" を含める */
+  sources?: SourceSet[];
   scope?: string;
   exclusions?: string[];
   queries?: string[];

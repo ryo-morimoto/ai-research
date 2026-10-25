@@ -59,8 +59,9 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
     steer: guarded(async (runId: unknown, q: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
       const input = parse(SteerInput, q, "steer");
-      const q2: { question: string; queries: string[]; urls?: string[] } = { question: input.question, queries: input.queries ?? [] };
+      const q2: { question: string; queries: string[]; urls?: string[]; sources?: ("web" | "scholarly")[] } = { question: input.question, queries: input.queries ?? [] };
       if (input.urls) q2.urls = input.urls;
+      if (input.sources) q2.sources = input.sources;
       return notFound((await runStub(env, id).steer(q2)) as Bundle, id);
     }, firstArg),
     deepen: guarded(async (runId: unknown) => {

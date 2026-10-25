@@ -54,4 +54,4 @@ export {
   type BlockKind,
 } from "./blocks.ts";
 export { LIMITS, type Limits } from "./limits.ts";
-export type { Source, SourceKind, Fingerprint, Volatility, ClaimStatusLabel, Tier } from "./types.ts";
+export type { Source, SourceKind, Fingerprint, Volatility, ClaimStatusLabel, Tier, WorkMeta } from "./types.ts";

@@ -22,7 +22,7 @@ export const DEFAULT_VOLATILITY_RULES: VolatilityRule[] = [
 ];
 
 export function baseVolatility(kind: SourceKind): Volatility {
-  return kind === "arxiv" ? "stable" : "normal";
+  return kind === "arxiv" || kind === "work" ? "stable" : "normal";
 }
 
 export function classifyVolatility(

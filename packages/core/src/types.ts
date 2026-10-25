@@ -1,4 +1,8 @@
-export type SourceKind = "web" | "github" | "arxiv";
+/** work は論文（書誌と抄録。設計 v1.4 D13、§8.2.2） */
+export type SourceKind = "web" | "github" | "arxiv" | "work";
+
+/** 論文の書誌（書誌・抄録の API の値を原文どおりに） */
+export type WorkMeta = { authors: string[]; year?: number; venue?: string; doi?: string; pmid?: string; pmcid?: string };
 
 /** 出典の種類（設計 v1.4 D13）。保存せず、出典から決める（policy の tierOf） */
 export type Tier = "paper" | "official" | "encyclopedia" | "other";
@@ -8,6 +12,8 @@ export type Source = {
   url: string;
   title?: string;
   tier?: Tier;
+  /** 論文の書誌（kind が work のとき） */
+  work?: WorkMeta;
   /** 位置。例：owner/repo@<sha>:path#L10-24、arXiv:2401.01234v2 §3.1、URL＋見出しの道筋 */
   locator: string;
 };

@@ -10,15 +10,18 @@ import type { ClaimInput, HubError, HubErrorCode, QuestionInput } from "@ai-rese
 const str = z.string().trim().min(1);
 const strList = z.array(z.string()).max(8).optional();
 
+const sourceSet = z.array(z.enum(["web", "scholarly"])).min(1).max(2).optional();
+
 export const StartInput = z.object({
   question: str,
   mode: z.enum(["lookup", "survey"]),
+  sources: sourceSet,
   scope: z.string().optional(),
   exclusions: z.array(z.string()).max(16).optional(),
   queries: strList,
   urls: z.array(z.string().url()).max(8).optional(),
 });
-export const SteerInput = z.object({ question: str, queries: strList, urls: z.array(z.string().url()).max(8).optional() });
+export const SteerInput = z.object({ question: str, queries: strList, urls: z.array(z.string().url()).max(8).optional(), sources: sourceSet });
 export const ClaimsInput = z
   .array(z.object({ text: z.string(), cite: z.array(z.object({ passageId: z.string(), quote: z.string() })).max(8) }))
   .max(50);

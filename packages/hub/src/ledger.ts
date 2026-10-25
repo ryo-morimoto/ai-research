@@ -54,7 +54,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS records (
      seq INTEGER PRIMARY KEY,
      record_id TEXT UNIQUE NOT NULL,
-     kind TEXT NOT NULL CHECK (kind IN ('web','github','arxiv')),
+     kind TEXT NOT NULL CHECK (kind IN ('web','github','arxiv','work')),
      url TEXT NOT NULL,
      title TEXT,
      locator TEXT NOT NULL,
@@ -96,6 +96,7 @@ export class LedgerDO extends DurableObject<Env> {
     this.sql = ctx.storage.sql;
     ctx.blockConcurrencyWhile(async () => {
       for (const s of SCHEMA) this.sql.exec(s);
+      this.migrateKinds();
       try {
         for (const s of FTS_SCHEMA) this.sql.exec(s);
         this.fts = true;
@@ -103,6 +104,24 @@ export class LedgerDO extends DurableObject<Env> {
         this.fts = false;
       }
     });
+  }
+
+  /**
+   * 出典の種類の CHECK に work（論文）を足す（設計 v1.4 §8.2.2）。SQLite は CHECK を変えられないので、
+   * 同じ seq のまま新しい表に写して入れ替える。全文検索の索引は seq（rowid）で引くので作り直さない。冪等
+   */
+  migrateKinds(): boolean {
+    const cur = this.sql.exec<{ sql: string }>(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'records'`).toArray()[0];
+    if (!cur || cur.sql.includes("'work'")) return false;
+    const create = SCHEMA.find((s) => s.includes("CREATE TABLE IF NOT EXISTS records ("))!.replace("IF NOT EXISTS records (", "records_v2 (");
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(create);
+      this.sql.exec(`INSERT INTO records_v2 SELECT * FROM records`);
+      this.sql.exec(`DROP TABLE records`);
+      this.sql.exec(`ALTER TABLE records_v2 RENAME TO records`);
+      this.sql.exec(`CREATE INDEX IF NOT EXISTS records_url ON records (url)`);
+    });
+    return true;
   }
 
   /** 全文検索が trigram で使えているか（docs/03 §4 の Known Unknown の確認用） */

@@ -34,6 +34,7 @@ import type {
   Passage,
   Progress,
   QuestionInput,
+  SourceSet,
   VerifyResult,
 } from "@ai-research/sandbox-api";
 import type { Env } from "./env.ts";
@@ -108,6 +109,8 @@ type Meta = {
   queries: string[];
   urls: string[];
   mode: Mode;
+  /** 探す先（設計 v1.4 §8.2.2）。古い記録にはないので既定は ["web"] */
+  sources?: SourceSet[];
   deep: boolean;
   budget: BudgetState;
   done: boolean;
@@ -136,6 +139,8 @@ export class RunDO extends DurableObject<Env> {
   private waiters: (() => void)[] = [];
   private gateway: Gateway | null = null;
   private counters = { task: 0, source: 0, passage: 0, hit: 0, ev: 0 };
+  /** この実行で足した論文の数（POLICY.scholarly.maxWorks まで） */
+  private workCount = 0;
   private events: RunEvent[] = [];
   /** 版ごとに、束に入れた段落の本文（正規化後）。同じ文を二度届けない */
   private shownTexts = new Map<number, Set<string>>();
@@ -264,11 +269,15 @@ export class RunDO extends DurableObject<Env> {
   private addCutoff(v: number, cutoff: Cutoff, origin: CutoffOrigin): void {
     if (!this.current(v)) return;
     this.cutoffs.push({ cutoff, origin, v, delivered: false });
-    // ai-research で取れなかった URL は、組み込みの取得に回してよい（U-03 の例外。理由は policy で絞る）
+    this.noteRouteCutoff(cutoff);
+    this.notify();
+  }
+
+  /** ai-research で取れなかった URL は、組み込みの取得に回してよい（U-03 の例外。理由は policy で絞る） */
+  private noteRouteCutoff(cutoff: Cutoff): void {
     if (/^https?:\/\//.test(cutoff.what)) {
       this.ctx.waitUntil(routeStub(this.env).noteCutoff(cutoff.what, cutoff.why).catch(() => {}));
     }
-    this.notify();
   }
 
   private launch(v: number, opts: { queries: string[]; urls: string[]; question: string; extra?: boolean }): void {
@@ -286,7 +295,11 @@ export class RunDO extends DurableObject<Env> {
         async (signal) => {
           const r = await this.gw().withSignal(signal).fetchDoc(url);
           if (!this.current(v)) return;
-          if (r.ok && "doc" in r) this.addDoc(v, r.doc);
+          if (r.ok && "doc" in r) {
+            this.addDoc(v, r.doc);
+            // ページは取れず、DOI から書誌と抄録に取り直した。ページは経路外で読めるようにする（束の打ち切りには出さない）
+            if (r.fallbackFrom) this.noteRouteCutoff(r.fallbackFrom);
+          }
           else if (!r.ok) {
             this.prog().failed++;
             this.addCutoff(v, r.cutoff, origin);
@@ -315,6 +328,39 @@ export class RunDO extends DurableObject<Env> {
 
     // lookup で URL があれば検索しない（利用者が示した出典だけを読む。設計 v1.3 §8.1.2）
     const queries = opts.urls.length > 0 && !mode.searchWithUrls ? [] : opts.queries;
+    const sources = m.sources ?? ["web"];
+
+    // 論文の検索（設計 v1.4 §8.2.2）。書誌と抄録は検索の応答にあるので、取得し直さずに出典にする
+    if (sources.includes("scholarly")) {
+      const S = POLICY.scholarly;
+      let oaPages = 0;
+      for (const q of queries.slice(0, S.queriesMax)) {
+        this.spawn(v, `論文の検索: ${q}`, "system", async (signal) => {
+          const r = await this.gw().withSignal(signal).searchScholarly(q, S.perQuery);
+          if (!this.current(v)) return;
+          const p = this.prog();
+          p.searched++;
+          if (!r.ok) {
+            p.searchFailed++;
+            return this.addCutoff(v, r.cutoff, "system");
+          }
+          for (const w of r.works) {
+            const doc = await this.gw().workDoc(w);
+            if (!this.current(v) || this.fetchedUrls.has(doc.source.url) || this.workCount >= S.maxWorks) continue;
+            this.fetchedUrls.add(doc.source.url);
+            this.workCount++;
+            p.found++;
+            this.addDoc(v, doc);
+            // 公開の版（PMC）があれば、survey では本文のページも読む
+            if (w.meta.pmcid && w.isOpenAccess && mode.continues && oaPages < S.openAccessPages) {
+              oaPages++;
+              fetchUrl(`https://pmc.ncbi.nlm.nih.gov/articles/${w.meta.pmcid}/`, "search");
+            }
+          }
+        });
+      }
+    }
+    if (!sources.includes("web")) return;
     for (const q of queries) {
       this.spawn(v, `検索: ${q}`, "system", async (signal) => {
         const r = await this.gw().withSignal(signal).search(q);
@@ -618,6 +664,7 @@ export class RunDO extends DurableObject<Env> {
       queries,
       urls,
       mode: input.mode,
+      sources: input.sources?.length ? [...new Set(input.sources)] : ["web"],
       deep: false,
       budget: { used: 0, phase: "first", stopped: false },
       done: false,
@@ -667,7 +714,7 @@ export class RunDO extends DurableObject<Env> {
     return b;
   }
 
-  async steer(input: { question: string; queries: string[]; urls?: string[] }): Promise<Bundle> {
+  async steer(input: { question: string; queries: string[]; urls?: string[]; sources?: SourceSet[] }): Promise<Bundle> {
     const m = await this.load();
     if (!m) return this.notFoundBundle("", { kind: "run_not_found" });
     const question = String(input.question ?? "").trim() || m.question;
@@ -679,6 +726,7 @@ export class RunDO extends DurableObject<Env> {
     m.question = question;
     m.queries = queries;
     m.urls = urls;
+    if (input.sources?.length) m.sources = [...new Set(input.sources)];
     m.progress = zeroProgress();
     if (m.done) m.done = false;
     // 古い版の作業を止める。終わっても結果には混ぜない（INV-10）

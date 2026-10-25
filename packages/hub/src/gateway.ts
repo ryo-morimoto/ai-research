@@ -6,6 +6,17 @@ import { withLease, LeaseTimeout } from "./limiter.ts";
 import { parseRobots, isAllowed, type RobotsRules } from "./robots.ts";
 import { extractHtml, metaRefreshTarget } from "./extract.ts";
 import { deadlines, timeScale } from "./time.ts";
+import {
+  crossrefSearchUrl,
+  crossrefWorkUrl,
+  doiOf,
+  epmcSearchUrl,
+  mergeWorks,
+  worksFromCrossref,
+  worksFromEpmc,
+  workSource,
+  type Work,
+} from "./scholarly.ts";
 
 /**
  * 取得の出口（docs/02 §2.1、docs/03 §2.6）。外への取得はすべてここを通る（INV-12）。
@@ -33,8 +44,9 @@ async function makeDoc(source: Source, raw: Block[], fp: Omit<Fingerprint, "text
   return { source, blocks, text, fingerprint: { ...fp, textHash: await textHash(text) } };
 }
 
+/** fallbackFrom：ページが取れず、DOI から書誌と抄録に取り直したときの、ページの打ち切り（設計 v1.4 §8.2.2） */
 export type FetchResult =
-  | { ok: true; doc: Doc }
+  | { ok: true; doc: Doc; fallbackFrom?: Cutoff }
   | { ok: true; notModified: true; fingerprint: Fingerprint }
   | { ok: false; cutoff: Cutoff };
 
@@ -45,6 +57,7 @@ const MAX_BODY_CHARS = 2_000_000;
 type Classified =
   | { kind: "github"; owner: string; repo: string; ref: string; path: string; url: string }
   | { kind: "arxiv"; id: string; version: string | null; url: string }
+  | { kind: "work"; doi?: string; epmc?: { source: string; id: string }; url: string }
   | { kind: "web"; url: string };
 
 export function classifyUrl(input: string): Classified {
@@ -61,6 +74,14 @@ export function classifyUrl(input: string): Classified {
   if (host === "raw.githubusercontent.com" && parts.length >= 4) {
     const [owner, repo, ref, ...rest] = parts;
     return { kind: "github", owner: owner!, repo: repo!, ref: ref!, path: rest.join("/"), url: input };
+  }
+  // 論文の URL（https://doi.org/<DOI>、Europe PMC の記事）は書誌と抄録の API で読む（設計 v1.4 §8.2.2）
+  if (host === "doi.org" || host === "dx.doi.org") {
+    const doi = doiOf(u.pathname.slice(1));
+    if (doi) return { kind: "work", doi, url: input };
+  }
+  if (host === "europepmc.org" && parts[0] === "article" && parts.length >= 3) {
+    return { kind: "work", epmc: { source: parts[1]!, id: parts[2]! }, url: input };
   }
   if (host === "arxiv.org" || host === "www.arxiv.org") {
     const m = u.pathname.match(/\/(?:abs|pdf|html)\/(\d{4}\.\d{4,5})(v\d+)?/);
@@ -170,10 +191,60 @@ export class Gateway {
     try {
       if (c.kind === "github") return await this.fetchGithub(c);
       if (c.kind === "arxiv") return await this.fetchArxiv(c);
-      return await this.fetchWeb(c.url, conditional);
+      if (c.kind === "work") return await this.fetchWork(c);
+      const r = await this.fetchWeb(c.url, conditional);
+      // 出版社のページが取れなくても、URL に DOI があれば書誌と抄録に取り直す（設計 v1.4 §8.2.2）
+      const doi = !r.ok && r.cutoff.why !== "policy" ? doiOf(new URL(url).pathname) : null;
+      if (!r.ok && doi) {
+        const w = await this.fetchWork({ kind: "work", doi, url: `https://doi.org/${doi}` });
+        if (w.ok && "doc" in w) return { ok: true, doc: w.doc, fallbackFrom: r.cutoff };
+      }
+      return r;
     } catch (e) {
       return this.fail(url, this.errorCutoff(url, e));
     }
+  }
+
+  private async json(url: string): Promise<unknown | null> {
+    const r = await this.raw(url, { headers: { Accept: "application/json" } });
+    if (!r.ok) return null;
+    try {
+      return await r.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /** 論文を DOI か Europe PMC の識別で引く。Europe PMC と Crossref を並べて引き、1つにまとめる */
+  private async fetchWork(c: Extract<Classified, { kind: "work" }>): Promise<FetchResult> {
+    const q = c.doi ? `DOI:"${c.doi}"` : `EXT_ID:${c.epmc!.id} AND SRC:${c.epmc!.source}`;
+    const [ej, cj] = await Promise.all([
+      this.json(epmcSearchUrl(q, 1)).catch(() => null),
+      c.doi ? this.json(crossrefWorkUrl(c.doi)).catch(() => null) : Promise.resolve(null),
+    ]);
+    const match = (w: Work) => (c.doi ? w.meta.doi === c.doi : w.epmc?.id === c.epmc!.id);
+    const works = mergeWorks(worksFromEpmc(ej).filter(match), worksFromCrossref(cj).filter(match));
+    const w = works[0];
+    if (!w) return this.fail(c.url, { what: c.url, why: "error", detail: "書誌が見つからない（Europe PMC、Crossref）" });
+    return { ok: true, doc: await this.workDoc(w) };
+  }
+
+  async workDoc(w: Work): Promise<Doc> {
+    const { source, blocks } = workSource(w);
+    return makeDoc(source, blocks);
+  }
+
+  /**
+   * 論文の検索（設計 v1.4 §8.2.2）。Europe PMC と Crossref を並べて引き、DOI で1つにまとめる。
+   * 片方が失敗しても、もう片方の結果を返す。両方失敗したときだけ打ち切り
+   */
+  async searchScholarly(query: string, n: number): Promise<{ ok: true; works: Work[] } | { ok: false; cutoff: Cutoff }> {
+    const [ej, cj] = await Promise.all([
+      this.json(epmcSearchUrl(query, n)).catch(() => null),
+      this.json(crossrefSearchUrl(query, n)).catch(() => null),
+    ]);
+    if (ej === null && cj === null) return { ok: false, cutoff: { what: `論文の検索: ${query}`, why: "error", detail: "Europe PMC と Crossref の両方に届かない" } };
+    return { ok: true, works: mergeWorks(worksFromEpmc(ej), worksFromCrossref(cj)) };
   }
 
   private githubHeaders(): Record<string, string> {
