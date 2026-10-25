@@ -1,0 +1,30 @@
+{
+  "description": "2026-10-25 の心理学の文献調査のふりかえりで、一次資料に届かなかった・0件だった問い（道具は指定しない）。ai-research の経路そのものを測るため、依頼の最後に「出典の原文で確かめて」を付ける（付けない版は経路の判断を測る別のケース）",
+  "cases": [
+    {
+      "id": "kluger-denisi",
+      "kind": "scholarly",
+      "prompt": "Kluger と DeNisi（1996）のフィードバック介入のメタ分析で、平均の効果量はいくつで、どんなときに逆効果になると述べている？ 出典の原文で確かめて。"
+    },
+    {
+      "id": "gollwitzer-mindset",
+      "kind": "scholarly",
+      "prompt": "Gollwitzer の熟慮マインドセットと実行マインドセットの研究で、主な知見は何？ 出典の原文で確かめて。"
+    },
+    {
+      "id": "kahneman-klein",
+      "kind": "scholarly",
+      "prompt": "Kahneman と Klein（2009）は、直観的な専門性が信頼できる条件を何と述べている？ 出典の原文で確かめて。"
+    },
+    {
+      "id": "hogarth-einhorn",
+      "kind": "scholarly",
+      "prompt": "Hogarth と Einhorn（1992）の信念調整モデルでは、証拠の提示順序の効果をどう説明している？ 出典の原文で確かめて。"
+    },
+    {
+      "id": "kluger-denisi-plain",
+      "kind": "scholarly-routing",
+      "prompt": "Kluger と DeNisi（1996）のフィードバック介入のメタ分析で、平均の効果量はいくつ？"
+    }
+  ]
+}

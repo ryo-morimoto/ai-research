@@ -16,11 +16,16 @@
   answer      最終回答の推定トークン
   off_path    最終回答に「経路外」があるか
   error       ai-research の道具がエラーを返したか
+  urls        ai-research が返した段落・台帳の候補の出典 URL の数
+  scholarly   そのうち学術の出典（DOI・PubMed・PMC・arXiv・Europe PMC・出版社の論文ページ）の数
+  empty       段落も台帳の候補も0件で返った start/steer の回数
 結果は bench/results/<日時>-<label>/ に保存する（.gitignore 済み）。
 """
 import argparse, concurrent.futures as cf, json, os, re, subprocess, sys, time
 
 CJK = re.compile(r"[　-鿿가-힯＀-￯]")
+
+SCHOLARLY = re.compile(r"doi\.org/|/doi/10\.|pubmed|ncbi\.nlm\.nih\.gov/pmc|pmc\.ncbi|europepmc|arxiv\.org|psycnet|sciencedirect\.com/science/article|onlinelibrary\.wiley|link\.springer|tandfonline|sagepub|jstor|semanticscholar|openalex")
 
 def est_tokens(s: str) -> int:
     cjk = len(CJK.findall(s))
@@ -39,6 +44,7 @@ def run_case(case, args, outdir):
 
 def analyze(path, case, secs):
     calls = research = 0; in_tok = 0; ids = set(); cited = set(); final = ""; error = False; names = []
+    urls = set(); empty = 0
     pending = {}
     for line in open(path):
         try: e = json.loads(line)
@@ -61,6 +67,8 @@ def analyze(path, case, secs):
                 if "ai-research" in name:
                     in_tok += est_tokens(t)
                     ids |= set(re.findall(r'"passageId\\?"?\s*:\s*\\?"([ph]\d+)', t))
+                    urls |= set(re.findall(r'"url\\?"?\s*:\s*\\?"(https?://[^"\\]+)', t))
+                    if re.search(r'"passages\\?"?\s*:\s*\[\s*\]', t) and re.search(r'"ledgerHits\\?"?\s*:\s*\[\s*\]', t): empty += 1
                     if c.get("is_error") or '"error"' in t[:200]: error = True
         if e.get("type") == "result": final = e.get("result") or ""
     return {
@@ -68,6 +76,7 @@ def analyze(path, case, secs):
         "passages": len(ids), "cited": len(cited & ids) if ids else len(cited),
         "precision": round(len(cited & ids) / len(ids), 2) if ids else None,
         "answer": est_tokens(final), "off_path": "経路外" in final, "error": error, "tools": names,
+        "urls": len(urls), "scholarly": sum(1 for u in urls if SCHOLARLY.search(u)), "empty": empty,
     }
 
 def main():
@@ -84,7 +93,7 @@ def main():
     with cf.ThreadPoolExecutor(args.parallel) as ex:
         rows = list(ex.map(lambda c: run_case(c, args, outdir), cases))
     json.dump(rows, open(os.path.join(outdir, "summary.json"), "w"), ensure_ascii=False, indent=1)
-    cols = ["id", "secs", "calls", "research", "in_tokens", "passages", "cited", "precision", "answer", "off_path", "error"]
+    cols = ["id", "secs", "calls", "research", "in_tokens", "passages", "urls", "scholarly", "empty", "answer", "off_path", "error"]
     print(" | ".join(cols))
     for r in rows: print(" | ".join(str(r[c]) for c in cols))
     tot = {c: sum(r[c] for r in rows) for c in ["calls", "research", "in_tokens", "answer"]}
