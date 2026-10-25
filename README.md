@@ -10,8 +10,8 @@
 
 | 文書 | 中身 |
 |---|---|
-| [docs/01-requirements-and-constraints.md](docs/01-requirements-and-constraints.md) | やりたいことと制約（v0.5） |
-| [docs/02-architecture.md](docs/02-architecture.md) | アーキテクチャと設計（v1.1） |
+| [docs/01-requirements-and-constraints.md](docs/01-requirements-and-constraints.md) | やりたいことと制約（v0.8） |
+| [docs/02-architecture.md](docs/02-architecture.md) | アーキテクチャと設計（v1.4） |
 | [docs/03-detailed-design-and-verification.md](docs/03-detailed-design-and-verification.md) | 詳細設計と検証方法（stage2）。Known Unknowns の確認結果と、結合試験で見つかったこと（§4） |
 | [docs/04-deploy-and-operations.md](docs/04-deploy-and-operations.md) | デプロイ、claude.ai への登録、運用、試験の動かし方 |
 
@@ -28,7 +28,10 @@ bench                 計測（試験用の依頼セット、呼び出し器。M
 
 ## 状態
 
-実装 v0.1。Cloudflare にデプロイし、claude.ai のカスタムコネクタから使えることを確かめた（[docs/04](docs/04-deploy-and-operations.md) §2.7）。結合試験（workerd の上、偽の取得先に対して）が通る。個別の道具（`web.*`・`github.*`・`arxiv.*`）、計測、トレース検証の TLC での照合はこれから。
+Cloudflare にデプロイし、claude.ai のカスタムコネクタとプラグインから使っている。設計 v1.4（論文の書誌と抄録、作業が尽きたら終わる、関連の絶対の下限、照合の状態の名前）まで実装した。計測は [docs/02](docs/02-architecture.md) §8.1.6・§8.2.9。
+
+- 論文・研究の知見は `sources: ["scholarly", "web"]` で、Europe PMC と Crossref（キー不要）から書誌と抄録を引く。出版社のページが拒んだら URL の DOI に回る
+- 照合の状態は「引用確認済」「照合失敗」「未照合」など。表すのは引用が原文にあるかだけで、主張の正しさではない
 
 ## 使い方（claude.ai のアカウントに3つ登録する）
 
@@ -51,6 +54,7 @@ SPEC_MODE=full pnpm spec:check # Apalache のモデル検査も（Java 17 以上
 
 ```sh
 python3 -I bench/run_cases.py bench/cases/feedback-2026-10-24.json --mcp-config <トークン入りの MCP 設定> --plugin-dir plugins/ai-research --label <名前>
+python3 -I bench/run_cases.py bench/cases/scholarly-2026-10-25.json ...   # 論文の知見（Q-08）
 ```
 
 ## ライセンス
