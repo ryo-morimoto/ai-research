@@ -39,6 +39,9 @@ const CROSSREF_TYPES = new Set([
   "dissertation",
 ]);
 
+/** DOI をそろえる（小文字、重なった / を1つに。Europe PMC は "10.1037//0022-…" の形を返すことがある） */
+export const normDoi = (d: string) => d.trim().toLowerCase().replace(/\/{2,}/g, "/");
+
 const DOI_RE = /\b(10\.\d{4,9}\/[^\s?#&"'<>]+)/i;
 
 /** URL や文字列に含まれる DOI（小文字にそろえる）。出版社の URL の末尾の飾り（/full、/abstract、.pdf）は外す */
@@ -51,7 +54,7 @@ export function doiOf(input: string): string | null {
   }
   const m = s.match(DOI_RE);
   if (!m?.[1]) return null;
-  let doi = m[1].replace(/[.,;)\]]+$/, "");
+  let doi = m[1].replace(/[.,;)\]]+$/, "").replace(/\/{2,}/g, "/");
   doi = doi.replace(/(\/(full|abstract|abs|pdf|epdf|html|fulltext|summary|references|figures))+$/i, "").replace(/\.pdf$/i, "");
   return doi.toLowerCase();
 }
@@ -109,7 +112,7 @@ export function worksFromEpmc(json: unknown): Work[] {
     if (Number.isFinite(year) && year > 0) meta.year = year;
     const venue = r.journalInfo?.journal?.title ?? r.journalTitle ?? r.bookOrReportDetails?.publisher;
     if (venue) meta.venue = venue;
-    if (r.doi) meta.doi = r.doi.toLowerCase();
+    if (r.doi) meta.doi = normDoi(r.doi);
     if (r.pmid) meta.pmid = r.pmid;
     if (r.pmcid) meta.pmcid = r.pmcid;
     const w: Work = { meta, title };
@@ -151,7 +154,7 @@ export function worksFromCrossref(json: unknown): Work[] {
     const title = stripTags(it.title?.[0] ?? "");
     if (!title || !it.DOI) continue;
     const authors = (it.author ?? []).map((a) => a.name ?? [a.given, a.family].filter(Boolean).join(" ")).filter(Boolean);
-    const meta: WorkMeta = { authors, doi: it.DOI.toLowerCase() };
+    const meta: WorkMeta = { authors, doi: normDoi(it.DOI) };
     const year = it.issued?.["date-parts"]?.[0]?.[0];
     if (typeof year === "number") meta.year = year;
     if (it["container-title"]?.[0]) meta.venue = it["container-title"][0];

@@ -90,6 +90,10 @@ export function classifyUrl(input: string): Classified {
     const doi = doiOf(u.pathname.slice(1));
     if (doi) return { kind: "work", doi, url: input };
   }
+  // PubMed の記事のページは、書誌と抄録の API（Europe PMC）で読む（ページは自動の取得に本文を返さないことがある。設計 v1.5 §8.3.4）
+  if (host === "pubmed.ncbi.nlm.nih.gov" && /^\d{1,9}$/.test(parts[0] ?? "")) {
+    return { kind: "work", epmc: { source: "MED", id: parts[0]! }, url: input };
+  }
   if (host === "europepmc.org" && parts[0] === "article" && parts.length >= 3) {
     return { kind: "work", epmc: { source: parts[1]!, id: parts[2]! }, url: input };
   }

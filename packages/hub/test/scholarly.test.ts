@@ -126,3 +126,18 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
     });
   });
 });
+
+describe("PubMed と台帳の出典（設計 v1.5 §8.3.4、§8.3.3）", () => {
+  it("PubMed の記事の URL は Europe PMC の書誌と抄録で読む", () => {
+    expect(classifyUrl("https://pubmed.ncbi.nlm.nih.gov/19739881/")).toMatchObject({ kind: "work", epmc: { source: "MED", id: "19739881" } });
+  });
+});
+
+describe("DOI のそろえ方", () => {
+  it("重なった / と大文字をそろえ、同じ論文を1つにまとめる", () => {
+    const e = worksFromEpmc({ resultList: { result: [{ id: "1", source: "MED", doi: "10.1037//0022-3514.69.2.213", title: "Effects of mindset on positive illusions" }] } });
+    const c = worksFromCrossref({ message: { items: [{ DOI: "10.1037/0022-3514.69.2.213", title: ["Effects of mindset on positive illusions."], type: "journal-article" }] } });
+    expect(mergeWorks(e, c)).toHaveLength(1);
+    expect(doiOf("https://doi.org/10.1037//0022-3514.69.2.213")).toBe("10.1037/0022-3514.69.2.213");
+  });
+});

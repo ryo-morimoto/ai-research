@@ -28,9 +28,17 @@ import { EMPTY_NEXT, POLICY, VERIFY_NEXT, procedureVersion, tierOf } from "@ai-r
  */
 export function compactSource(s: SourceRef): SourceRef {
   const out: SourceRef = { ...s };
-  if (out.locator === out.url) delete (out as { locator?: string }).locator;
-  if (out.work && out.work.authors.length > POLICY.sourceAuthorsMax) {
-    out.work = { ...out.work, authors: [...out.work.authors.slice(0, POLICY.sourceAuthorsMax), "et al."] };
+  // 論文の locator（doi:…）と work.doi は URL（https://doi.org/…）と同じ情報。PMID・PMCID は束では使わない
+  if (out.locator === out.url || (out.kind === "work" && out.locator?.startsWith("doi:"))) delete (out as { locator?: string }).locator;
+  if (out.work) {
+    const { authors, year, venue, doi } = out.work;
+    const w: NonNullable<SourceRef["work"]> = {
+      authors: authors.length > POLICY.sourceAuthorsMax ? [...authors.slice(0, POLICY.sourceAuthorsMax), "et al."] : authors,
+    };
+    if (year !== undefined) w.year = year;
+    if (venue) w.venue = venue;
+    if (doi && !out.url.endsWith(doi)) w.doi = doi;
+    out.work = w;
   }
   return out;
 }
@@ -633,7 +641,14 @@ export class RunDO extends DurableObject<Env> {
     const assemble = (list: typeof selected): Bundle => {
       const sources = { ...hitSources };
       const passages = list.map((s) => ({ ...this.toPassage(paraOf(s), sources), text: s.text }));
-      return { ...base, sources, passages };
+      // 台帳の候補と段落が同じ出典なら、出典を1つにまとめる（段落の sourceId に寄せる）
+      const byUrl = new Map(Object.entries(sources).filter(([k]) => !k.startsWith("h")).map(([k, v]) => [v.url, k]));
+      const ledgerHits = base.ledgerHits.map((h) => {
+        const to = byUrl.get(sources[h.sourceId]?.url ?? "");
+        return to && to !== h.sourceId ? { ...h, sourceId: to } : h;
+      });
+      for (const k of Object.keys(sources)) if (k.startsWith("h") && !ledgerHits.some((h) => h.sourceId === k)) delete sources[k];
+      return { ...base, sources, passages, ledgerHits };
     };
     let bundle = assemble(chosen);
     let want = estimateJsonTokens(bundle);
@@ -887,10 +902,13 @@ export class RunDO extends DurableObject<Env> {
     const m = await this.load();
     const none = (n: Partial<AroundResult>): AroundResult => ({ sources: {}, passages: [], cutoffs: [], notices: [], ...n });
     if (!m) return none({ notices: [{ kind: "run_not_found" }] });
-    let src = [...this.sources.values()].find((s) => s.v === m.version && (s.sourceId === source || urlKey(s.doc.source.url) === urlKey(source)));
+    // 台帳の候補の出典（h…）は、その抜き書きの URL で探す
+    const hit = this.hits.get(source);
+    const want = hit ? hit.record.url : source;
+    let src = [...this.sources.values()].find((s) => s.v === m.version && (s.sourceId === want || urlKey(s.doc.source.url) === urlKey(want)));
     if (!src) {
-      const meta = Object.values(m.passageMeta).find((x) => x.v === m.version && (x.sourceId === source || urlKey(x.url) === urlKey(source)));
-      const url = meta?.url ?? (/^https?:\/\//.test(source) ? source : null);
+      const meta = Object.values(m.passageMeta).find((x) => x.v === m.version && (x.sourceId === want || urlKey(x.url) === urlKey(want)));
+      const url = meta?.url ?? (/^https?:\/\//.test(want) ? want : null);
       if (!url) return none({ notices: [{ kind: "source_not_found", source }] });
       const r = await this.gw().fetchDoc(url);
       if (!r.ok) return none({ cutoffs: [r.cutoff] });

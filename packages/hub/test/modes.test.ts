@@ -243,6 +243,21 @@ describe("行き止まりをなくす（no_passage と research.find、設計 v1
     expect((await stub.find(np.sourceId!, "前置き")).passages.length).toBeGreaterThan(0);
   });
 
+  it("台帳の候補の出典（h…）でも find できる。台帳の候補と段落が同じ出典なら、出典は1つにまとめる", async () => {
+    const l = ledger();
+    const text = "プロンプトキャッシュは前置きが完全に一致したときにだけ効く。";
+    await l.appendVerified(excerptFrom(text, text, { url: "https://docs.example.com/cache", locator: "https://docs.example.com/cache" }), "normal", "r");
+    const { id, stub } = newRun();
+    const b = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュの前置き", queries: ["cache"] });
+    const last = b.done ? b : await stub.next(50_000);
+    const hit = [...b.ledgerHits, ...last.ledgerHits][0]!;
+    expect(hit).toBeDefined();
+    const urls = Object.values({ ...b.sources }).map((s) => s.url);
+    expect(urls.filter((u) => u === "https://docs.example.com/cache").length).toBeLessThanOrEqual(1);
+    const f = await stub.find(hit.sourceId, "書き込みの料金");
+    expect(f.passages[0]?.text).toContain("書き込みの料金");
+  });
+
   it("段落が届いた出典は no_passage にしない。まだ終わっていない束でも出さない", async () => {
     const { id, stub } = newRun();
     const b = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュの前置き", queries: ["cache"] });

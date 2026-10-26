@@ -44,7 +44,7 @@ def run_case(case, args, outdir):
 
 def analyze(path, case, secs):
     calls = research = 0; in_tok = 0; ids = set(); cited = set(); final = ""; error = False; names = []
-    urls = set(); empty = 0
+    urls = set(); empty = 0; result_chars = []
     pending = {}
     for line in open(path):
         try: e = json.loads(line)
@@ -65,7 +65,7 @@ def analyze(path, case, secs):
                 name = pending.get(c.get("tool_use_id"), "")
                 t = c.get("content"); t = t if isinstance(t, str) else json.dumps(t, ensure_ascii=False)
                 if "ai-research" in name:
-                    in_tok += est_tokens(t)
+                    in_tok += est_tokens(t); result_chars.append(len(t))
                     ids |= set(re.findall(r'"passageId\\?"?\s*:\s*\\?"([ph]\d+)', t))
                     urls |= set(re.findall(r'"url\\?"?\s*:\s*\\?"(https?://[^"\\]+)', t))
                     if re.search(r'"passages\\?"?\s*:\s*\[\s*\]', t) and re.search(r'"ledgerHits\\?"?\s*:\s*\[\s*\]', t): empty += 1
@@ -77,6 +77,11 @@ def analyze(path, case, secs):
         "precision": round(len(cited & ids) / len(ids), 2) if ids else None,
         "answer": est_tokens(final), "off_path": "経路外" in final, "error": error, "tools": names,
         "urls": len(urls), "scholarly": sum(1 for u in urls if SCHOLARLY.search(u)), "empty": empty,
+        # M2（設計 v1.5 §8.3.7）：ai-research の結果1回あたりの文字数
+        "avg_result_chars": round(sum(result_chars) / len(result_chars)) if result_chars else 0,
+        # M3（§8.3.8）：決めたラベルを使ったか、古い・独自のラベルが混じったか
+        "labels_ok": bool(re.search(r"引用確認済|書誌のみ|未照合|背景知識|経路外", final)),
+        "odd_labels": len(re.findall(r"[（(【\[]\s*(?:確認済|未確認|書誌のみ・|背景知識・)", final)),
         # Q-08：答えが一次資料（論文の DOI・PMC など）を出典に挙げたか
         "answer_scholarly": len(set(m.group(0) for m in re.finditer(r"https?://[^\s)\]>」]+", final) if SCHOLARLY.search(m.group(0)))) + len(set(re.findall(r"\bdoi:\s?10\.\d{4,9}/\S+", final))),
     }
@@ -95,7 +100,7 @@ def main():
     with cf.ThreadPoolExecutor(args.parallel) as ex:
         rows = list(ex.map(lambda c: run_case(c, args, outdir), cases))
     json.dump(rows, open(os.path.join(outdir, "summary.json"), "w"), ensure_ascii=False, indent=1)
-    cols = ["id", "secs", "calls", "research", "in_tokens", "passages", "urls", "scholarly", "empty", "answer", "answer_scholarly", "off_path", "error"]
+    cols = ["id", "secs", "calls", "research", "in_tokens", "passages", "urls", "scholarly", "empty", "answer", "answer_scholarly", "avg_result_chars", "labels_ok", "odd_labels", "off_path", "error"]
     print(" | ".join(cols))
     for r in rows: print(" | ".join(str(r[c]) for c in cols))
     tot = {c: sum(r[c] for r in rows) for c in ["calls", "research", "in_tokens", "answer"]}
