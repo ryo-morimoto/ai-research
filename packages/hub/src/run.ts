@@ -261,7 +261,17 @@ export class RunDO extends DurableObject<Env> {
 
   private traceCutoff(v: number, cutoff: Cutoff, origin: CutoffOrigin): void {
     const host = hostOf(cutoff.what);
-    this.trace("cutoff", { v, what: cutoff.what, why: cutoff.why, origin, ...(host ? { host } : {}), ...(cutoff.detail ? { detail: cutoff.detail } : {}) });
+    // 取れなかった出典の種類（V-04 の tier ごとの数）。URL でなければ付けない
+    let where: { kind: string; tier: string } | null = null;
+    if (host) {
+      try {
+        const kind = classifyUrl(cutoff.what).kind;
+        where = { kind, tier: tierOf({ kind, url: cutoff.what }) };
+      } catch {
+        where = null;
+      }
+    }
+    this.trace("cutoff", { v, what: cutoff.what, why: cutoff.why, origin, ...(host ? { host } : {}), ...(where ?? {}), ...(cutoff.detail ? { detail: cutoff.detail } : {}) });
   }
 
   private gw(): Gateway {

@@ -118,19 +118,29 @@ export function buildServer(env: Env, opts: { executor?: Executor; client?: stri
     {
       description: "View 用。調査の記録を読む",
       inputSchema: {
-        view: z.enum(["today", "runs", "run"]),
+        view: z.enum(["today", "runs", "run", "gaps", "gapRuns"]),
         id: z.string().max(200).optional(),
         limit: z.number().int().min(1).max(200).optional(),
+        days: z.number().int().min(1).max(365).optional(),
+        host: z.string().max(300).optional(),
+        why: z.string().max(50).optional(),
       },
       annotations: { readOnlyHint: true },
       _meta: { ui: { visibility: ["app"] } },
     },
-    async ({ view, id, limit }) => {
+    async ({ view, id, limit, days, host, why }) => {
       const tr = traceStub(env);
       let data: Record<string, unknown>;
       if (view === "today") data = { view, ...(await tr.today()) };
       else if (view === "runs") data = { view, runs: await tr.runs(limit ? { limit } : {}) };
-      else {
+      else if (view === "gaps") data = { view, ...(await tr.gaps(days ?? 7)) };
+      else if (view === "gapRuns") {
+        const opts: { host?: string; why?: string; days?: number } = {};
+        if (host !== undefined) opts.host = host;
+        if (why) opts.why = why;
+        if (days) opts.days = days;
+        data = { view, host: host ?? null, why: why ?? null, runs: await tr.gapRuns(opts) };
+      } else {
         if (!id) return { content: [{ type: "text" as const, text: "id が要る" }], isError: true };
         data = { view, ...(await tr.run(id)) };
       }

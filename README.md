@@ -14,7 +14,7 @@
 | [docs/02-architecture.md](docs/02-architecture.md) | アーキテクチャと設計（v1.5） |
 | [docs/03-detailed-design-and-verification.md](docs/03-detailed-design-and-verification.md) | 詳細設計と検証方法（stage2）。Known Unknowns の確認結果と、結合試験で見つかったこと（§4） |
 | [docs/04-deploy-and-operations.md](docs/04-deploy-and-operations.md) | デプロイ、claude.ai への登録、運用、試験の動かし方 |
-| [docs/05-trace-and-view.md](docs/05-trace-and-view.md) | 調査の記録と見える化（v0.2）。要件・制約・設計の要約、記録（TraceDO）と会話の中の View、実機での確認の手順 |
+| [docs/05-trace-and-view.md](docs/05-trace-and-view.md) | 調査の記録と見える化（v0.3）。要件・制約・設計の要約、記録（TraceDO）と会話の中の View、実機での確認の手順 |
 
 ## 構成
 

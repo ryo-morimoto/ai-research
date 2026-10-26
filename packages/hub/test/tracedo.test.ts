@@ -156,4 +156,60 @@ describe("調査の記録（TraceDO）", () => {
     expect(ids).not.toContain("old_run");
     expect(await tr().events("old_run")).toEqual([]);
   });
+
+  it("V-03：調査の流れには、問いの版ごとの概念とずれの印が付く。打ち切りには出典の種類が付く", async () => {
+    const { id, stub } = newRun();
+    let b = await stub.start(id, { mode: "survey", question: "取得先の制限は", queries: ["limits"] });
+    while (!b.done) b = await stub.next(50_000);
+    await eventsUntil(id, has("run.done"));
+    const r = await tr().run(id);
+    expect(r.drift).toHaveLength(1);
+    expect(r.drift[0]!.concepts.map((c) => c.label)).toEqual(["limits"]);
+    const blocked = r.events.find((e) => e.type === "cutoff" && e.why === "blocked") as Extract<TraceEvent, { type: "cutoff" }>;
+    expect(blocked.kind).toBe("web");
+    expect(blocked.tier).toBeTruthy();
+  });
+
+  it("V-04・V-10：取りこぼしを理由・ホスト・種類・手順の版ごとに数え、元の調査へたどれる", async () => {
+    const t = Date.now();
+    let ev = 0;
+    const E = (runId: string, e: Record<string, unknown>) => ({ runId, at: t, ev: ++ev, v: 1, ...e });
+    await tr().append(
+      JSON.stringify([
+        E("g1", { type: "run.started", question: "q1", mode: "survey", procedureVersion: "A" }),
+        E("g1", { type: "source.fetched", sourceId: "s1", url: "https://a.example/x", host: "a.example", tier: "official" }),
+        E("g1", { type: "source.fetched", sourceId: "s2", url: "https://a.example/x", host: "a.example", tier: "official", reused: true }),
+        E("g1", { type: "cutoff", what: "https://b.example/y", why: "blocked", host: "b.example", kind: "web", tier: "other" }),
+        E("g1", { type: "cutoff", what: "https://b.example/z", why: "timeout", host: "b.example", kind: "web", tier: "other" }),
+        E("g1", { type: "verify.done", claims: [{ status: "照合失敗", reason: "near_miss", passageIds: ["p1"], recorded: [] }, { status: "引用確認済", passageIds: ["p2"], recorded: ["r1"] }] }),
+        E("g2", { type: "run.started", question: "q2", mode: "lookup", procedureVersion: "B" }),
+        E("g2", { type: "cutoff", what: "検索: q2", why: "error" }),
+        E("g2", { type: "cutoff", what: "https://b.example/w", why: "blocked", host: "b.example", kind: "web", tier: "other" }),
+        E("g3", { type: "run.started", question: "q3", mode: "lookup", procedureVersion: "B" }),
+        E("g3", { type: "cutoff", what: "https://c.example/", why: "robots", host: "c.example" }),
+      ]),
+    );
+    await tr().forget("g3");
+    const g = await tr().gaps(7);
+    expect(g.byWhy).toEqual([
+      { why: "blocked", n: 2 },
+      { why: "error", n: 1 },
+      { why: "timeout", n: 1 },
+    ]);
+    expect(g.byHost[0]).toEqual({ host: "b.example", fetched: 0, cutoffs: 3, reasons: { blocked: 2, timeout: 1 } });
+    expect(g.byHost.find((h) => h.host === "")).toMatchObject({ cutoffs: 1, reasons: { error: 1 } });
+    expect(g.byHost.some((h) => h.host === "c.example")).toBe(false);
+    expect(g.byTier).toEqual([
+      { tier: "official", fetched: 1, cutoffs: 0 },
+      { tier: "other", fetched: 0, cutoffs: 3 },
+    ]);
+    expect(g.byVersion.map((v) => [v.procedureVersion, v.runs, v.cutoffs])).toEqual([
+      ["A", 1, 2],
+      ["B", 1, 2],
+    ]);
+    expect(g.verifyReasons).toEqual([{ reason: "near_miss", n: 1 }]);
+    expect((await tr().gapRuns({ host: "b.example" })).map((r) => r.runId).sort()).toEqual(["g1", "g2"]);
+    expect((await tr().gapRuns({ host: "b.example", why: "timeout" })).map((r) => r.runId)).toEqual(["g1"]);
+    expect((await tr().gapRuns({ host: "" })).map((r) => r.runId)).toEqual(["g2"]);
+  });
 });

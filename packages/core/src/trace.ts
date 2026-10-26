@@ -57,7 +57,7 @@ export type TraceEvent =
   | (Base & { type: "passage.selected"; passageId: string; sourceId: string; context?: string; chars?: number; via?: string })
   | (Base & { type: "ledger.hit"; recordId: string; status: string; url?: string; reason?: string })
   | (Base & { type: "verify.done"; claims?: TraceClaim[] })
-  | (Base & { type: "cutoff"; what: string; why: string; host?: string; origin?: string; detail?: string });
+  | (Base & { type: "cutoff"; what: string; why: string; host?: string; kind?: string; tier?: string; origin?: string; detail?: string });
 
 export type TraceEventType = TraceEvent["type"];
 
@@ -77,7 +77,7 @@ const SCHEMA: Record<TraceEventType, Record<string, FieldKind>> = {
   "passage.selected": { passageId: "s", sourceId: "s", context: "s", chars: "n", via: "s" },
   "ledger.hit": { recordId: "s", url: "u", status: "s", reason: "s" },
   "verify.done": { claims: "c" },
-  cutoff: { what: "u", why: "s", host: "s", origin: "s", detail: "s" },
+  cutoff: { what: "u", why: "s", host: "s", kind: "s", tier: "s", origin: "s", detail: "s" },
 };
 
 /** 欄の型が必須か（ない・形が違うなら事象ごと捨てる）。それ以外は任意 */

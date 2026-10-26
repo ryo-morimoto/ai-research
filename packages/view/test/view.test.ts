@@ -180,4 +180,74 @@ describe("View", () => {
     expect(document.querySelectorAll("script")).toHaveLength(2);
     expect(JSON.parse(document.getElementById("cfg")!.textContent!).appVersion).toBe("</script><script>alert(1)</script>");
   });
+
+  it("V-03：調査の流れの版ごとに概念を並べ、どこにも当たらない概念と外れの出典に印を付ける", async () => {
+    const v = boot();
+    await initialized(v);
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: { date: "d", started: 1, running: [], recent: [run()] } } });
+    (v.document.querySelector('[data-run="run_a"]') as any).dispatchEvent(new (v.document.defaultView as any).Event("click"));
+    await v.deliver(null);
+    const t0 = run().startedAt;
+    const events = [
+      { type: "run.started", runId: "run_a", at: t0, ev: 1, v: 1, question: "q", mode: "survey", queries: ["alpha beta", "gamma"] },
+      { type: "source.fetched", runId: "run_a", at: t0 + 1, ev: 2, v: 1, sourceId: "s1", url: "https://x.test/a", host: "x.test", title: "alpha beta" },
+      { type: "source.fetched", runId: "run_a", at: t0 + 2, ev: 3, v: 1, sourceId: "s2", url: "https://y.test/b", host: "y.test", title: "curry" },
+    ];
+    const drift = [{ v: 1, question: "q", concepts: [{ label: "alpha beta", queries: ["alpha beta"], terms: ["alpha", "beta"], reachedBy: ["s1"] }, { label: "gamma", queries: ["gamma"], terms: ["gamma"], reachedBy: [] }], sources: [], unreached: ["gamma"], off: ["s2"] }];
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: { view: "run", summary: run(), events, drift } } });
+    const chips = Array.from(v.document.querySelectorAll(".chip")).map((c) => [c.textContent, c.className]);
+    expect(chips).toEqual([["alpha beta", "chip"], ["gamma", "chip miss"]]);
+    expect(v.text()).toContain("外れの出典 1 件");
+    const offRows = Array.from(v.document.querySelectorAll(".ev")).filter((r) => r.querySelector(".x.off"));
+    expect(offRows.map((r) => r.textContent)).toEqual([expect.stringContaining("curry")]);
+  });
+
+  it("V-04：取りこぼしの画面から、取得先ごとの調査の一覧、調査の流れへたどり、戻れる", async () => {
+    const v = boot();
+    await initialized(v);
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: { date: "d", started: 0, running: [], recent: [] } } });
+    const click = (sel: string) => (v.document.querySelector(sel) as any).dispatchEvent(new (v.document.defaultView as any).Event("click"));
+    click('[data-tab="gaps"]');
+    await v.deliver(null);
+    expect(v.last("tools/call")!.params.arguments).toEqual({ view: "gaps", days: 7 });
+    const gaps = {
+      view: "gaps", days: 7, since: 0,
+      byWhy: [{ why: "blocked", n: 3 }, { why: "timeout", n: 1 }],
+      byHost: [{ host: "b.example", fetched: 1, cutoffs: 3, reasons: { blocked: 2, timeout: 1 } }, { host: "", fetched: 0, cutoffs: 1, reasons: { error: 1 } }],
+      byTier: [{ tier: "other", fetched: 1, cutoffs: 3 }],
+      byVersion: [{ procedureVersion: "2026-10-26.2+abcdef123456", firstAt: 0, runs: 2, fetched: 5, cutoffs: 3, verified: 4, failedClaims: 1 }],
+      verifyReasons: [{ reason: "near_miss", n: 1 }],
+    };
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: gaps } });
+    const t = v.text();
+    expect(t).toContain("取りこぼし");
+    expect(t).toContain("打ち切り 3／取得 1（75%）");
+    expect(t).toContain("blocked 2・timeout 1");
+    expect(t).toContain("URL でない");
+    expect(t).toContain("2026-10-26.2+abcdef");
+    expect(t).toContain("near_miss");
+
+    click('[data-host="b.example"]');
+    await v.deliver(null);
+    expect(v.last("tools/call")!.params.arguments).toEqual({ view: "gapRuns", days: 7, host: "b.example" });
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: { view: "gapRuns", runs: [run()] } } });
+    click('[data-run="run_a"]');
+    await v.deliver(null);
+    expect(v.last("tools/call")!.params.arguments).toEqual({ view: "run", id: "run_a" });
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: { view: "run", summary: run(), events: [], drift: [] } } });
+    click(".back");
+    await v.deliver(null);
+    // 戻ると、たどってきた一覧（取得先ごとの調査）を読み直す
+    expect(v.last("tools/call")!.params.arguments).toEqual({ view: "gapRuns", days: 7, host: "b.example" });
+
+    // 期間を変える
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: { view: "gapRuns", runs: [] } } });
+    click(".back");
+    await v.deliver(null);
+    await v.deliver({ jsonrpc: "2.0", id: v.last("tools/call")!.id, result: { structuredContent: gaps } });
+    const p30 = Array.from(v.document.querySelectorAll(".period")).find((b) => b.textContent === "30日") as any;
+    p30.dispatchEvent(new (v.document.defaultView as any).Event("click"));
+    await v.deliver(null);
+    expect(v.last("tools/call")!.params.arguments).toEqual({ view: "gaps", days: 30 });
+  });
 });

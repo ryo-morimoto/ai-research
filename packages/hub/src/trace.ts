@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { sanitizeTraceEvent, type TraceEvent } from "@ai-research/core";
+import { driftOf, sanitizeTraceEvent, type DriftVersion, type TraceEvent } from "@ai-research/core";
 import { POLICY } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 
@@ -71,6 +71,17 @@ const toSummary = (r: RunRow): RunSummary => ({
   failedClaims: r.failed_claims,
   events: r.events,
 });
+
+/** 取りこぼしの偏り（V-04、V-10、目的 2）。host が "" は URL でない打ち切り（検索そのものの失敗など） */
+export type Gaps = {
+  days: number;
+  since: number;
+  byWhy: { why: string; n: number }[];
+  byHost: { host: string; fetched: number; cutoffs: number; reasons: Record<string, number> }[];
+  byTier: { tier: string; fetched: number; cutoffs: number }[];
+  byVersion: { procedureVersion: string; firstAt: number; runs: number; fetched: number; cutoffs: number; verified: number; failedClaims: number }[];
+  verifyReasons: { reason: string; n: number }[];
+};
 
 export class TraceDO extends DurableObject<Env> {
   private sql: SqlStorage;
@@ -257,11 +268,116 @@ export class TraceDO extends DurableObject<Env> {
     return { date, started, running, recent };
   }
 
-  /** 1つの調査の集計と事象（View の「調査の流れ」）。墓標が付いていれば null と空 */
-  run(runId: string): { summary: RunSummary | null; events: TraceEvent[] } {
-    if (this.forgotten(runId)) return { summary: null, events: [] };
+  /** 1つの調査の集計と事象と、ずれの印（View の「調査の流れ」）。墓標が付いていれば null と空 */
+  run(runId: string): { summary: RunSummary | null; events: TraceEvent[]; drift: DriftVersion[] } {
+    if (this.forgotten(runId)) return { summary: null, events: [], drift: [] };
     const row = this.sql.exec<RunRow>(`SELECT * FROM runs WHERE run_id = ?`, runId).toArray()[0];
-    return { summary: row ? toSummary(row) : null, events: this.events(runId) };
+    const events = this.events(runId);
+    // 1回の調査の概念とずれの印（V-03）。読むたびに計算する（事象の数は調査ごとに上限がある）
+    return { summary: row ? toSummary(row) : null, events, drift: driftOf(events) };
+  }
+
+  /**
+   * 取りこぼしの偏り（View の「取りこぼし」）。直近 days 日の打ち切りを理由・ホスト・出典の種類ごとに数え、
+   * 取得できた数と並べる。手順の版ごとの数も返す（V-10：方針を直した前後で比べる）
+   */
+  gaps(days = 7, now = Date.now()): Gaps {
+    const d = Math.min(POLICY.trace.retentionDays, Math.max(1, Math.floor(days)));
+    const since = now - d * 86_400_000;
+    const alive = `run_id NOT IN (SELECT run_id FROM tombstones)`;
+    const notReused = `coalesce(json_extract(json, '$.reused'), 0) = 0`;
+    const q = <T extends Record<string, SqlStorageValue>>(sql: string, ...args: SqlStorageValue[]) => this.sql.exec<T>(sql, ...args).toArray();
+
+    const byWhy = q<{ why: string; n: number }>(
+      `SELECT json_extract(json, '$.why') AS why, count(*) AS n FROM events WHERE type = 'cutoff' AND at >= ? AND ${alive} GROUP BY why ORDER BY n DESC, why`,
+      since,
+    );
+
+    const hosts = new Map<string, Gaps["byHost"][number]>();
+    const hostOf = (h: string) => {
+      let x = hosts.get(h);
+      if (!x) hosts.set(h, (x = { host: h, fetched: 0, cutoffs: 0, reasons: {} }));
+      return x;
+    };
+    for (const r of q<{ host: string; why: string; n: number }>(
+      `SELECT coalesce(json_extract(json, '$.host'), '') AS host, json_extract(json, '$.why') AS why, count(*) AS n
+       FROM events WHERE type = 'cutoff' AND at >= ? AND ${alive} GROUP BY host, why`,
+      since,
+    )) {
+      const x = hostOf(r.host);
+      x.cutoffs += r.n;
+      x.reasons[r.why] = r.n;
+    }
+    for (const r of q<{ host: string; n: number }>(
+      `SELECT coalesce(json_extract(json, '$.host'), '') AS host, count(*) AS n
+       FROM events WHERE type = 'source.fetched' AND at >= ? AND ${notReused} AND ${alive} GROUP BY host`,
+      since,
+    )) hostOf(r.host).fetched += r.n;
+    const byHost = [...hosts.values()]
+      .filter((h) => h.cutoffs > 0)
+      .sort((a, b) => b.cutoffs - a.cutoffs || b.fetched - a.fetched || a.host.localeCompare(b.host))
+      .slice(0, 30);
+
+    const tiers = new Map<string, Gaps["byTier"][number]>();
+    const tierOf = (t: string) => {
+      let x = tiers.get(t);
+      if (!x) tiers.set(t, (x = { tier: t, fetched: 0, cutoffs: 0 }));
+      return x;
+    };
+    for (const r of q<{ tier: string; n: number }>(
+      `SELECT coalesce(json_extract(json, '$.tier'), 'unknown') AS tier, count(*) AS n FROM events WHERE type = 'cutoff' AND at >= ? AND json_extract(json, '$.host') IS NOT NULL AND ${alive} GROUP BY tier`,
+      since,
+    )) tierOf(r.tier).cutoffs += r.n;
+    for (const r of q<{ tier: string; n: number }>(
+      `SELECT coalesce(json_extract(json, '$.tier'), 'unknown') AS tier, count(*) AS n FROM events WHERE type = 'source.fetched' AND at >= ? AND ${notReused} AND ${alive} GROUP BY tier`,
+      since,
+    )) tierOf(r.tier).fetched += r.n;
+    const order = ["paper", "official", "encyclopedia", "other", "unknown"];
+    const byTier = [...tiers.values()].sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier));
+
+    const byVersion = q<{ pv: string; first: number; runs: number; fetched: number; cutoffs: number; verified: number; failed: number }>(
+      `SELECT procedure_version AS pv, min(started_at) AS first, count(*) AS runs, sum(sources) AS fetched, sum(cutoffs) AS cutoffs,
+              sum(verified) AS verified, sum(failed_claims) AS failed
+       FROM runs WHERE started_at >= ? AND ${alive} GROUP BY pv ORDER BY first`,
+      since,
+    ).map((r) => ({ procedureVersion: r.pv, firstAt: r.first, runs: r.runs, fetched: r.fetched, cutoffs: r.cutoffs, verified: r.verified, failedClaims: r.failed }));
+
+    const verifyReasons = q<{ reason: string; n: number }>(
+      `SELECT json_extract(c.value, '$.reason') AS reason, count(*) AS n
+       FROM events e, json_each(e.json, '$.claims') c
+       WHERE e.type = 'verify.done' AND e.at >= ? AND e.run_id NOT IN (SELECT run_id FROM tombstones) AND json_extract(c.value, '$.reason') IS NOT NULL
+       GROUP BY reason ORDER BY n DESC, reason`,
+      since,
+    );
+
+    return { days: d, since, byWhy, byHost, byTier, byVersion, verifyReasons };
+  }
+
+  /** 取りこぼしから元の調査へ（V-04）。host が "" なら URL でない打ち切り。新しい順に 50 件まで */
+  gapRuns(opts: { host?: string; why?: string; days?: number } = {}, now = Date.now()): RunSummary[] {
+    const d = Math.min(POLICY.trace.retentionDays, Math.max(1, Math.floor(opts.days ?? 7)));
+    const since = now - d * 86_400_000;
+    const conds = [`type = 'cutoff'`, `at >= ?`];
+    const args: SqlStorageValue[] = [since];
+    if (opts.host !== undefined) {
+      if (opts.host === "") conds.push(`json_extract(json, '$.host') IS NULL`);
+      else {
+        conds.push(`json_extract(json, '$.host') = ?`);
+        args.push(opts.host);
+      }
+    }
+    if (opts.why) {
+      conds.push(`json_extract(json, '$.why') = ?`);
+      args.push(opts.why);
+    }
+    return this.sql
+      .exec<RunRow>(
+        `SELECT * FROM runs WHERE run_id IN (SELECT run_id FROM events WHERE ${conds.join(" AND ")})
+         AND run_id NOT IN (SELECT run_id FROM tombstones) ORDER BY started_at DESC LIMIT 50`,
+        ...args,
+      )
+      .toArray()
+      .map(toSummary);
   }
 
   /** 1つの調査の事象（届いた順ではなく、調査の中の順）。墓標が付いていれば空 */

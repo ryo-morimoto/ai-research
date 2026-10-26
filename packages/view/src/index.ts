@@ -82,6 +82,27 @@ ul { list-style: none; margin: 0; padding: 0; }
 .empty, .err { color: var(--fg2); padding: 12px 0; }
 .err { color: var(--bad); }
 .retry { margin-left: 8px; background: none; border: 1px solid var(--line); border-radius: var(--radius); color: var(--fg); font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
+.tabs { display: flex; gap: 4px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--fg2); font: inherit; font-size: 13px; padding: 6px 10px; cursor: pointer; margin-bottom: -1px; }
+.tab.on { color: var(--fg); border-bottom-color: var(--fg); font-weight: 600; }
+.periods { display: flex; gap: 6px; margin: 4px 0 8px; }
+.period { background: none; border: 1px solid var(--line); border-radius: var(--radius); color: var(--fg2); font: inherit; font-size: 12px; padding: 2px 10px; cursor: pointer; }
+.period.on { color: var(--fg); border-color: var(--fg2); font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--fg2); overflow-wrap: anywhere; }
+.chip.miss { border-color: var(--warn); color: var(--warn); }
+.chip.miss::before { content: "未到達 "; font-weight: 600; }
+.note { font-size: 12px; color: var(--warn); margin: 2px 0 0; }
+.x.off { color: var(--warn); font-weight: 600; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; align-items: baseline; }
+button.row { width: 100%; text-align: left; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+button.row:hover .name { color: var(--accent); }
+.name { overflow-wrap: anywhere; min-width: 0; }
+.num { font-variant-numeric: tabular-nums; color: var(--fg2); font-size: 12px; text-align: right; white-space: nowrap; }
+.nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.why { grid-column: 1 / -1; color: var(--fg3); font-size: 12px; }
+.bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--bg2); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--warn); }
 @media (max-width: 420px) {
   #app { padding: 10px 12px 12px; }
   .ev { grid-template-columns: 44px 56px 1fr; gap: 6px; }
@@ -165,6 +186,10 @@ const SCRIPT = `
     try { return new Date(ms).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: ctx.timeZone || undefined }); }
     catch (e) { return new Date(ms).toISOString().slice(11, 16); }
   }
+  function mdhm(ms) {
+    try { return new Date(ms).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: ctx.timeZone || undefined }); }
+    catch (e) { return new Date(ms).toISOString().slice(5, 16).replace("T", " "); }
+  }
   function secs(ms) { return "+" + (Math.max(0, ms) / 1000).toFixed(1) + "s"; }
   function hostOf(u) { try { return new URL(u).hostname; } catch (e) { return u; } }
 
@@ -211,7 +236,7 @@ const SCRIPT = `
     return meta;
   }
 
-  function runList(title, runs) {
+  function runList(title, runs, back) {
     var frag = document.createDocumentFragment();
     frag.appendChild(el("h2", "", title));
     if (!runs.length) { frag.appendChild(el("div", "empty", "ありません")); return frag; }
@@ -222,12 +247,23 @@ const SCRIPT = `
       b.setAttribute("data-run", r.runId);
       b.appendChild(el("div", "q", r.question || "（問いなし）"));
       b.appendChild(runMeta(r));
-      b.addEventListener("click", function () { showRun(r.runId); });
+      b.addEventListener("click", function () { showRun(r.runId, back); });
       li.appendChild(b);
       ul.appendChild(li);
     });
     frag.appendChild(ul);
     return frag;
+  }
+
+  function tabs(active) {
+    var nav = el("div", "tabs");
+    [["today", "今日"], ["gaps", "取りこぼし"]].forEach(function (t) {
+      var b = el("button", "tab" + (t[0] === active ? " on" : ""), t[1]);
+      b.setAttribute("data-tab", t[0]);
+      b.addEventListener("click", function () { if (t[0] === "today") showToday(); else showGaps(lastDays); });
+      nav.appendChild(b);
+    });
+    return nav;
   }
 
   // ---- 今日 ----
@@ -238,6 +274,7 @@ const SCRIPT = `
     read({ view: "today" }).then(function (d) {
       if (gen !== screen.gen) return;
       clear();
+      root.appendChild(tabs("today"));
       root.appendChild(el("h1", "", "今日の調査"));
       root.appendChild(el("div", "sub", d.date || ""));
       var counts = el("div", "counts");
@@ -247,9 +284,9 @@ const SCRIPT = `
       var running = d.running || [];
       var live = {};
       running.forEach(function (r) { live[r.runId] = true; });
-      if (running.length) root.appendChild(runList("実行中", running));
+      if (running.length) root.appendChild(runList("実行中", running, showToday));
       // 実行中のものは上に出しているので、最近の一覧には重ねて出さない
-      root.appendChild(runList("最近の調査", (d.recent || []).filter(function (r) { return !live[r.runId]; })));
+      root.appendChild(runList("最近の調査", (d.recent || []).filter(function (r) { return !live[r.runId]; }), showToday));
       reportSize();
       if ((d.running || []).length) schedule(function () { if (gen === screen.gen) showToday(); });
     }).catch(function (e) {
@@ -274,7 +311,7 @@ const SCRIPT = `
     "cutoff": ["打ち切り", "cut"]
   };
 
-  function detail(e) {
+  function detail(e, off) {
     var d = el("div", "d");
     function main(t) { d.appendChild(document.createTextNode(String(t))); }
     function extra(t) { d.appendChild(el("span", "x", t)); }
@@ -294,6 +331,8 @@ const SCRIPT = `
       case "source.fetched":
         main(e.title || e.host || hostOf(e.url));
         extra((e.host || hostOf(e.url)) + "・" + (e.tier || "") + (e.ms !== undefined ? "・" + e.ms + "ms" : "") + (e.reused ? "・使い回し" : ""));
+        // 問いと検索語の語を1つも含まない出典（目安。V-03）
+        if (off) d.appendChild(el("span", "x off", "外れ"));
         break;
       case "passage.selected":
         main(e.context || e.passageId);
@@ -324,16 +363,19 @@ const SCRIPT = `
     return d;
   }
 
-  function showRun(runId) {
+  function showRun(runId, back) {
     var gen = ++screen.gen;
+    var goBack = back || showToday;
     screen.name = "run";
     screen.runId = runId;
     read({ view: "run", id: runId }).then(function (d) {
       if (gen !== screen.gen) return;
       clear();
-      var back = el("button", "back", "← 今日の調査");
-      back.addEventListener("click", showToday);
-      root.appendChild(back);
+      var backBtn = el("button", "back", "← 戻る");
+      backBtn.addEventListener("click", function () { goBack(); });
+      root.appendChild(backBtn);
+      var drift = {};
+      (d.drift || []).forEach(function (x) { drift[x.v] = x; });
       var s = d.summary;
       var events = d.events || [];
       if (!s) { root.appendChild(el("div", "empty", "この調査の記録はありません")); reportSize(); return; }
@@ -347,6 +389,20 @@ const SCRIPT = `
           var ver = el("div", "ver");
           ver.appendChild(el("b", "", "問いの版 " + e.v));
           ver.appendChild(document.createTextNode(String(e.question || "")));
+          // 探している概念（検索語）と、どの出典にも当たっていない概念（目安。V-03）
+          var dv = drift[e.v];
+          if (dv && dv.concepts.length) {
+            var chips = el("div", "chips");
+            chips.setAttribute("data-v", String(e.v));
+            dv.concepts.forEach(function (c) {
+              var miss = c.reachedBy.length === 0;
+              var chip = el("span", "chip" + (miss ? " miss" : ""), c.label);
+              chip.setAttribute("title", miss ? "どの出典の題・見出しにも当たっていない" : "当たった出典 " + c.reachedBy.length);
+              chips.appendChild(chip);
+            });
+            ver.appendChild(chips);
+            if (dv.off.length) ver.appendChild(el("div", "note", "外れの出典 " + dv.off.length + " 件（問いと検索語の語を含まない）"));
+          }
           root.appendChild(ver);
         }
         var k = KIND[e.type] || [e.type, ""];
@@ -357,16 +413,151 @@ const SCRIPT = `
         if (e.type === "search.sent" && e.ok === false) cls = "bad";
         if (e.type === "verify.done" && (e.claims || []).some(function (c) { return c.status.indexOf("引用確認済") !== 0; })) cls = "bad";
         row.appendChild(el("div", "k" + (cls ? " " + cls : ""), k[0]));
-        row.appendChild(detail(e));
+        var isOff = e.type === "source.fetched" && drift[e.v] && drift[e.v].off.indexOf(e.sourceId) >= 0;
+        row.appendChild(detail(e, isOff));
         root.appendChild(row);
       });
       if (!events.length) root.appendChild(el("div", "empty", "まだ記録が届いていません"));
       reportSize();
-      if (!s.done) schedule(function () { if (gen === screen.gen) showRun(runId); });
+      if (!s.done) schedule(function () { if (gen === screen.gen) showRun(runId, back); });
     }).catch(function (e) {
       if (gen !== screen.gen) return;
       clear();
-      root.appendChild(failBox(e, function () { showRun(runId); }));
+      root.appendChild(failBox(e, function () { showRun(runId, back); }));
+      reportSize();
+    });
+  }
+
+  // ---- 取りこぼし（V-04、V-10、目的 2） ----
+  var lastDays = 7;
+  function pct(a, b) { return b > 0 ? Math.round((a / b) * 100) + "%" : "-"; }
+  function bar(ratio) {
+    var b = el("div", "bar");
+    var i = el("i");
+    i.style.setProperty("width", Math.max(0, Math.min(100, Math.round(ratio * 100))) + "%");
+    b.appendChild(i);
+    return b;
+  }
+  function reasonsText(reasons) {
+    return Object.keys(reasons).sort(function (a, b) { return reasons[b] - reasons[a] || (a < b ? -1 : 1); }).map(function (k) { return k + " " + reasons[k]; }).join("・");
+  }
+  function shortVersion(v) {
+    var i = String(v || "").indexOf("+");
+    return i >= 0 ? v.slice(0, i) + "+" + v.slice(i + 1, i + 7) : String(v || "（版なし）");
+  }
+
+  function showGaps(days) {
+    var gen = ++screen.gen;
+    lastDays = days;
+    screen.name = "gaps";
+    screen.runId = null;
+    read({ view: "gaps", days: days }).then(function (g) {
+      if (gen !== screen.gen) return;
+      clear();
+      root.appendChild(tabs("gaps"));
+      root.appendChild(el("h1", "", "取りこぼし"));
+      root.appendChild(el("div", "sub", "打ち切りと照合失敗の偏り。直近 " + g.days + " 日"));
+      var periods = el("div", "periods");
+      [7, 30, 90].forEach(function (n) {
+        var b = el("button", "period" + (n === g.days ? " on" : ""), n + "日");
+        b.addEventListener("click", function () { showGaps(n); });
+        periods.appendChild(b);
+      });
+      root.appendChild(periods);
+
+      var byWhy = g.byWhy || [];
+      root.appendChild(el("h2", "", "打ち切りの理由"));
+      if (!byWhy.length) root.appendChild(el("div", "empty", "打ち切りはありません"));
+      var maxWhy = byWhy.reduce(function (m, w) { return Math.max(m, w.n); }, 0);
+      byWhy.forEach(function (w) {
+        var r = el("button", "row");
+        r.setAttribute("data-why", w.why);
+        r.appendChild(el("div", "name", w.why));
+        r.appendChild(el("div", "num", w.n + " 件"));
+        r.appendChild(bar(maxWhy ? w.n / maxWhy : 0));
+        r.addEventListener("click", function () { showGapRuns({ why: w.why }, g.days); });
+        root.appendChild(r);
+      });
+
+      var byHost = g.byHost || [];
+      if (byHost.length) {
+        root.appendChild(el("h2", "", "取得先ごと（打ち切りの多い順）"));
+        byHost.forEach(function (h) {
+          var r = el("button", "row");
+          r.setAttribute("data-host", h.host);
+          r.appendChild(el("div", "name", h.host || "（URL でない：検索そのものなど）"));
+          r.appendChild(el("div", "num", "打ち切り " + h.cutoffs + "／取得 " + h.fetched + "（" + pct(h.cutoffs, h.cutoffs + h.fetched) + "）"));
+          r.appendChild(el("div", "why", reasonsText(h.reasons || {})));
+          r.addEventListener("click", function () { showGapRuns({ host: h.host }, g.days); });
+          root.appendChild(r);
+        });
+      }
+
+      var byTier = g.byTier || [];
+      if (byTier.length) {
+        root.appendChild(el("h2", "", "出典の種類ごと"));
+        byTier.forEach(function (t) {
+          var r = el("div", "row");
+          r.appendChild(el("div", "name", t.tier));
+          r.appendChild(el("div", "num", "打ち切り " + t.cutoffs + "／取得 " + t.fetched + "（" + pct(t.cutoffs, t.cutoffs + t.fetched) + "）"));
+          root.appendChild(r);
+        });
+      }
+
+      var byVersion = g.byVersion || [];
+      if (byVersion.length) {
+        root.appendChild(el("h2", "", "手順の版ごと（古い順）"));
+        byVersion.forEach(function (v) {
+          // 版の名前は折り返さない。数は下の行に置く（狭い画面で名前が割れないように）
+          var r = el("div", "row ver-row");
+          r.appendChild(el("div", "name nowrap", shortVersion(v.procedureVersion)));
+          r.appendChild(el("div", "num", mdhm(v.firstAt) + " から"));
+          r.appendChild(el("div", "why", "調査 " + v.runs + "・打ち切り " + pct(v.cutoffs, v.cutoffs + v.fetched) + "・照合失敗 " + v.failedClaims + "/" + (v.verified + v.failedClaims)));
+          root.appendChild(r);
+        });
+      }
+
+      var vr = g.verifyReasons || [];
+      if (vr.length) {
+        root.appendChild(el("h2", "", "照合失敗の理由"));
+        vr.forEach(function (x) {
+          var r = el("div", "row");
+          r.appendChild(el("div", "name", x.reason));
+          r.appendChild(el("div", "num", x.n + " 件"));
+          root.appendChild(r);
+        });
+      }
+      reportSize();
+    }).catch(function (e) {
+      if (gen !== screen.gen) return;
+      clear();
+      root.appendChild(failBox(e, function () { showGaps(days); }));
+      reportSize();
+    });
+  }
+
+  function showGapRuns(filter, days) {
+    var gen = ++screen.gen;
+    screen.name = "gapRuns";
+    var args = { view: "gapRuns", days: days };
+    if (filter.host !== undefined) args.host = filter.host;
+    if (filter.why) args.why = filter.why;
+    var self = function () { showGapRuns(filter, days); };
+    read(args).then(function (d) {
+      if (gen !== screen.gen) return;
+      clear();
+      var backBtn = el("button", "back", "← 取りこぼし");
+      backBtn.addEventListener("click", function () { showGaps(days); });
+      root.appendChild(backBtn);
+      var label = filter.host !== undefined ? (filter.host || "URL でない打ち切り") : filter.why;
+      root.appendChild(el("h1", "", label));
+      root.appendChild(el("div", "sub", "この打ち切りがあった調査。直近 " + days + " 日"));
+      root.appendChild(runList("調査", d.runs || [], self));
+      reportSize();
+    }).catch(function (e) {
+      if (gen !== screen.gen) return;
+      clear();
+      root.appendChild(failBox(e, self));
       reportSize();
     });
   }

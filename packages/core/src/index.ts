@@ -69,4 +69,5 @@ export {
   type TraceLimits,
   type TraceOrigin,
 } from "./trace.ts";
+export { driftOf, DRIFT_DEFAULTS, type DriftOptions, type DriftConcept, type DriftSource, type DriftVersion } from "./drift.ts";
 export type { Source, SourceKind, Fingerprint, Volatility, ClaimStatusLabel, Tier, WorkMeta } from "./types.ts";
