@@ -186,7 +186,7 @@ URL を読む：
   async () => research.start({ question: "解釈した問い", mode: "lookup", urls: ["https://…"] })
 論文・研究の知見：sources: ["scholarly", "web"] を足す。
 
-ai-research で取れなかった URL（cutoffs の blocked / timeout / gave_up / error / unsupported / no_passage。urls を含む）は、このあと WebFetch で読めます。pending はまだ集めているもので、取れなかったものではありません。結果には「経路外（ai-research で取れなかった）」と書いてください。
+ai-research で取れなかった URL（cutoffs の blocked / timeout / gave_up / error / unsupported / no_passage。urls を含む）は、このあと WebFetch で読めます。pending は取れなかったものではありません。結果には「経路外（ai-research で取れなかった）」と書いてください。
 ツール検索で ai-research が見つからないときは、このあと組み込みのウェブ検索・取得を使えます。結果には「経路外（ai-research が使えない）」と書いてください。
 利用者がウェブ検索を明示したときだけ、組み込みのウェブ検索を使えます。`;
 
