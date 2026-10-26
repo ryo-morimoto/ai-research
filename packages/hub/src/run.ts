@@ -18,6 +18,7 @@ import {
   planRevalidation,
   judgeRevalidation,
   textHash,
+  hostOf,
   type BudgetState,
   type Fingerprint,
   type Paragraph,
@@ -77,6 +78,7 @@ import { routeStub, urlKey } from "./route.ts";
 import { deadlines, timeScale } from "./time.ts";
 import { timed } from "./obs.ts";
 import { presentCutoffs, type CutoffItem, type CutoffOrigin } from "./cutoffs.ts";
+import { traceStub } from "./trace.ts";
 
 /**
  * 1つの調査の実行（docs/03 §2.5.1、specs/run.qnt）。1依頼に1つ（idFromName(runId)）。
@@ -156,7 +158,7 @@ type Meta = {
   /** 段落のメタデータ（本文は持たない。INV-13） */
   passageMeta: Record<string, { sourceId: string; url: string; locator: string; v: number; index: number }>;
   /** ID の払い出しの続き。退避の後も同じ ID を使い回さないために保存する */
-  counters?: { task: number; source: number; passage: number; hit: number };
+  counters?: { task: number; source: number; passage: number; hit: number; trace?: number };
   progress?: ProgressCounts;
 };
 
@@ -175,7 +177,7 @@ export class RunDO extends DurableObject<Env> {
   private fetchedUrls = new Set<string>();
   private waiters: (() => void)[] = [];
   private gateway: Gateway | null = null;
-  private counters = { task: 0, source: 0, passage: 0, hit: 0, ev: 0 };
+  private counters = { task: 0, source: 0, passage: 0, hit: 0, ev: 0, trace: 0 };
   /** この実行で足した論文の数（POLICY.scholarly.maxWorks まで） */
   private workCount = 0;
   /** 公開の版（本文）を読みに行った論文の数と、抄録・公開の版を補った論文の数（設計 v1.5 §8.3.4） */
@@ -188,6 +190,12 @@ export class RunDO extends DurableObject<Env> {
   private noPassageReported = new Set<string>();
   /** 版ごとに、束に入れた段落の本文（正規化後）。同じ文を二度届けない */
   private shownTexts = new Map<number, Set<string>>();
+  /** 調査の記録（docs/05）。送る前の事象と、送っている最中か。送れなかった数 */
+  private traceBuf: Record<string, unknown>[] = [];
+  private traceFlushing = false;
+  private traceDropped = 0;
+  /** 打ち切り（gave_up）として記録した作業。二度記録しない */
+  private gaveUpTraced = new Set<number>();
 
   // ---- 状態の読み書き -------------------------------------------------------
 
@@ -204,8 +212,8 @@ export class RunDO extends DurableObject<Env> {
 
   private async save(): Promise<void> {
     if (this.meta) {
-      const { task, source, passage, hit } = this.counters;
-      this.meta.counters = { task, source, passage, hit };
+      const { task, source, passage, hit, trace } = this.counters;
+      this.meta.counters = { task, source, passage, hit, trace };
       const meta = this.meta;
       await timed("run.save.meta", () => this.ctx.storage.put("meta", meta));
     }
@@ -214,6 +222,46 @@ export class RunDO extends DurableObject<Env> {
 
   private log(type: string, data: Record<string, unknown> = {}): void {
     this.events.push({ ev: ++this.counters.ev, at: Date.now(), type, ...data });
+  }
+
+  /**
+   * 調査の記録に事象を1件積む（docs/05）。送るのは待たない（C-03）。
+   * 段落の本文は渡さない（C-04）。TraceDO の側でも整形で落とす
+   */
+  private trace(type: string, data: Record<string, unknown>): void {
+    const m = this.meta;
+    if (!m) return;
+    this.traceBuf.push({ type, runId: m.runId, at: Date.now(), ev: ++this.counters.trace, ...data });
+    this.flushTrace();
+  }
+
+  private flushTrace(): void {
+    if (this.traceFlushing) return;
+    this.traceFlushing = true;
+    this.ctx.waitUntil(
+      (async () => {
+        // 同じ同期の区切りで積まれた事象をまとめて送る
+        await Promise.resolve();
+        try {
+          while (this.traceBuf.length) {
+            const batch = this.traceBuf.splice(0, POLICY.trace.flushBatch);
+            try {
+              await traceStub(this.env).append(JSON.stringify(batch));
+            } catch (e) {
+              this.traceDropped += batch.length;
+              console.log(JSON.stringify({ event: "trace_dropped", n: batch.length, total: this.traceDropped, error: String(e).slice(0, 200) }));
+            }
+          }
+        } finally {
+          this.traceFlushing = false;
+        }
+      })(),
+    );
+  }
+
+  private traceCutoff(v: number, cutoff: Cutoff, origin: CutoffOrigin): void {
+    const host = hostOf(cutoff.what);
+    this.trace("cutoff", { v, what: cutoff.what, why: cutoff.why, origin, ...(host ? { host } : {}), ...(cutoff.detail ? { detail: cutoff.detail } : {}) });
   }
 
   private gw(): Gateway {
@@ -270,7 +318,9 @@ export class RunDO extends DurableObject<Env> {
     fn(controller.signal)
       .catch((e) => {
         if (v === this.meta?.version && !controller.signal.aborted) {
-          this.cutoffs.push({ cutoff: { what: label, why: "error", detail: String(e).slice(0, 200) }, origin, v, delivered: false });
+          const cutoff: Cutoff = { what: url ?? label, why: "error", detail: String(e).slice(0, 200) };
+          this.cutoffs.push({ cutoff: { ...cutoff, what: label }, origin, v, delivered: false });
+          this.traceCutoff(v, cutoff, origin);
         }
       })
       .finally(() => {
@@ -294,11 +344,24 @@ export class RunDO extends DurableObject<Env> {
   }
 
   /** 取得した原文を登録する。古い版の作業の結果は混ぜない（INV-10） */
-  private addDoc(v: number, doc: Doc, origin?: CutoffOrigin): string | null {
+  private addDoc(v: number, doc: Doc, origin?: CutoffOrigin, info: { ms?: number; reused?: boolean } = {}): string | null {
     if (!this.current(v)) return null;
     const sourceId = `s${++this.counters.source}`;
     this.sources.set(sourceId, origin ? { sourceId, doc, v, origin } : { sourceId, doc, v });
     this.prog().fetched++;
+    const src = doc.source;
+    this.trace("source.fetched", {
+      v,
+      sourceId,
+      url: src.url,
+      host: hostOf(src.url) ?? "",
+      kind: src.kind,
+      tier: tierOf(src),
+      origin: origin ?? "system",
+      ...(src.title ? { title: src.title } : {}),
+      ...(info.ms !== undefined ? { ms: info.ms } : {}),
+      ...(info.reused ? { reused: true } : {}),
+    });
     for (const p of candidateParagraphs(sourceId, doc.blocks)) {
       const passageId = `p${++this.counters.passage}`;
       const e: ParaEntry = { passageId, sourceId, text: p.text, v, index: p.index, delivered: false };
@@ -314,6 +377,7 @@ export class RunDO extends DurableObject<Env> {
   private addCutoff(v: number, cutoff: Cutoff, origin: CutoffOrigin): void {
     if (!this.current(v)) return;
     this.cutoffs.push({ cutoff, origin, v, delivered: false });
+    this.traceCutoff(v, cutoff, origin);
     this.noteRouteCutoff(cutoff);
     this.notify();
   }
@@ -372,10 +436,11 @@ export class RunDO extends DurableObject<Env> {
         `取得: ${url}`,
         origin,
         async (signal) => {
+          const t0 = Date.now();
           const r = await this.gw().withSignal(signal).fetchDoc(url);
           if (!this.current(v)) return;
           if (r.ok && "doc" in r) {
-            this.addDoc(v, r.doc, origin);
+            this.addDoc(v, r.doc, origin, { ms: Date.now() - t0 });
             this.followRelated(v, r.doc, origin);
             // ページは取れず、DOI から書誌と抄録に取り直した。ページは経路外で読めるようにする（束の打ち切りには出さない）
             if (r.fallbackFrom) this.noteRouteCutoff(r.fallbackFrom);
@@ -422,6 +487,7 @@ export class RunDO extends DurableObject<Env> {
         this.spawn(v, `論文の検索: ${q}`, "system", async (signal) => {
           const r = await this.gw().withSignal(signal).searchScholarly(q, S.perQuery);
           if (!this.current(v)) return;
+          this.trace("search.sent", { v, query: q, provider: "scholarly", ok: r.ok, hits: r.ok ? r.works.length : 0 });
           const p = this.prog();
           p.searched++;
           if (!r.ok) {
@@ -461,6 +527,7 @@ export class RunDO extends DurableObject<Env> {
       this.spawn(v, `検索: ${q}`, "system", async (signal) => {
         const r = await this.gw().withSignal(signal).search(q);
         if (!this.current(v)) return;
+        this.trace("search.sent", { v, query: q, provider: "web", ok: r.ok, hits: r.ok ? r.hits.length : 0 });
         const p = this.prog();
         p.searched++;
         if (!r.ok) {
@@ -701,7 +768,10 @@ export class RunDO extends DurableObject<Env> {
       const noPassage = this.noPassageItems(v, new Set(bundle.passages.map((p) => p.sourceId)));
       if (noPassage.length) {
         bundle.cutoffs = presentCutoffs([...cutoffItems, ...noPassage]);
-        for (const it of noPassage) this.noteRouteCutoff(it.cutoff);
+        for (const it of noPassage) {
+          this.noteRouteCutoff(it.cutoff);
+          this.traceCutoff(v, it.cutoff, it.origin);
+        }
       }
     }
     // 問いと出典の言語が違い、語で段落を選べない出典を知らせる（設計 v1.6 §8.4.1、S-06）
@@ -718,11 +788,23 @@ export class RunDO extends DurableObject<Env> {
       if (e) {
         e.delivered = true;
         shown.add(normalize(e.text));
+        this.trace("passage.selected", { v, passageId: e.passageId, sourceId: e.sourceId, chars: p.text.length, via: "bundle", ...(e.context ? { context: e.context } : {}) });
       }
     }
     for (const h of bundle.ledgerHits) {
       const e = this.hits.get(h.passageId);
-      if (e) e.deliveredStatus = e.status;
+      if (e) {
+        e.deliveredStatus = e.status;
+        this.trace("ledger.hit", { v, recordId: e.record.recordId, url: e.record.url, status: e.status, ...(e.reason ? { reason: e.reason } : {}) });
+      }
+    }
+    // 締め切りで終わらなかった作業（gave_up）を1回だけ記録する
+    if (m.done) {
+      for (const t of unfinished) {
+        if (this.gaveUpTraced.has(t.id)) continue;
+        this.gaveUpTraced.add(t.id);
+        this.traceCutoff(v, { what: t.url ?? t.label, why: "gave_up", detail: "調査の終わりまでに終わらなかった" }, t.origin);
+      }
     }
     for (const c of pendingCutoffs) c.delivered = true;
     this.log("bundle", {
@@ -840,6 +922,17 @@ export class RunDO extends DurableObject<Env> {
     if (input.exclusions) meta.exclusions = input.exclusions;
     this.meta = meta;
     this.log("start", { v: 1 });
+    this.trace("run.started", {
+      v: 1,
+      question,
+      mode: meta.mode,
+      sources: meta.sources,
+      queries,
+      urls,
+      procedure: POLICY.revision,
+      procedureVersion: meta.manifest.procedureVersion,
+      ...(client ? { client } : {}),
+    });
     await timed("run.setAlarm", () => this.ctx.storage.setAlarm(Date.now() + deadlines(this.env).continueUntilMs * timeScale(this.env)));
     this.launch(1, { queries, urls, question });
     return this.firstBundle(1, input.waitMs);
@@ -916,8 +1009,9 @@ export class RunDO extends DurableObject<Env> {
     if (m.done) m.done = false;
     // 古い版の作業を止める。終わっても結果には混ぜない（INV-10）
     for (const t of this.tasks.values()) if (t.v === old && !t.done) t.controller.abort();
+    this.trace("run.steered", { v, question, queries, urls });
     // 取得済みの原文は、新しい版の作業として使い回す（新しい問いで選び直す）
-    for (const s of [...this.sources.values()].filter((x) => x.v === old)) this.addDoc(v, s.doc, s.origin);
+    for (const s of [...this.sources.values()].filter((x) => x.v === old)) this.addDoc(v, s.doc, s.origin, { reused: true });
     this.log("steer", { v });
     this.launch(v, { queries, urls, question });
     return this.firstBundle(v, input.waitMs);
@@ -930,6 +1024,7 @@ export class RunDO extends DurableObject<Env> {
     m.done = false;
     m.budget = advance(m.budget, "deep", this.caps());
     this.log("deepen", { v: m.version });
+    this.trace("run.deepened", { v: m.version });
     this.launch(m.version, { queries: m.queries, urls: m.urls, question: m.question, extra: true });
     return this.firstBundle(m.version);
   }
@@ -1025,7 +1120,9 @@ export class RunDO extends DurableObject<Env> {
       }
       e.delivered = true;
       shown.add(normalize(e.text));
-      passages.push({ ...this.toPassage(e, sources), text: clip(e.text, query, POLICY.around.maxChars) });
+      const text = clip(e.text, query, POLICY.around.maxChars);
+      passages.push({ ...this.toPassage(e, sources), text });
+      this.trace("passage.selected", { v: m.version, passageId: e.passageId, sourceId: e.sourceId, chars: text.length, via: event, ...(e.context ? { context: e.context } : {}) });
     }
     const notices: Notice[] = [];
     const want = estimateJsonTokens({ sources, passages });
@@ -1102,6 +1199,15 @@ export class RunDO extends DurableObject<Env> {
       else statuses.push({ index, status: allExact ? "引用確認済" : "引用確認済（表記差あり）", recorded });
     }
     this.log("verify", { v: m.version, n: list.length, ok: statuses.filter((s) => s.status.startsWith("引用確認済")).length });
+    this.trace("verify.done", {
+      v: m.version,
+      claims: statuses.map((st) => ({
+        status: st.status,
+        ...(st.reason ? { reason: st.reason } : {}),
+        passageIds: (Array.isArray(list[st.index]?.cite) ? list[st.index]!.cite : []).map((c) => String(c.passageId ?? "")),
+        recorded: st.recorded ?? [],
+      })),
+    });
     await this.save();
     return { statuses, notices };
   }
@@ -1151,6 +1257,8 @@ export class RunDO extends DurableObject<Env> {
       }
     }
     this.log("finish", { v: m.version, why, unfinished: this.unfinished(m.version).map((t) => t.id) });
+    const p = this.prog();
+    this.trace("run.done", { v: m.version, why, searched: p.searched, found: p.found, fetched: p.fetched, failed: p.failed, elapsedMs: Date.now() - m.createdAtMs });
     this.notify();
   }
 

@@ -6,6 +6,8 @@
  *    （`as VerifiedExcerpt` や `as unknown as VerifiedExcerpt` を他で書かない）
  * 2. packages/core は他のワークスペースのパッケージにも Cloudflare の API にも依存しない
  * 3. 台帳への追記（appendVerified）を呼べるのは hub の ledger モジュールと run モジュールだけ
+ * 4. 調査の記録（docs/05）は、見るための道。取得の出口・code の実行・外への通信に依存しない（V-01）。
+ *    hub/src/trace*.ts と core/src/trace.ts が使ってよいのは、下の TRACE_ALLOWED だけ。fetch も呼ばない
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -26,6 +28,7 @@ function walk(dir) {
 }
 
 const files = walk(join(root, "packages"));
+const TRACE_ALLOWED = new Set(["cloudflare:workers", "@ai-research/core", "@ai-research/policy", "./env.ts"]);
 for (const f of files) {
   const rel = relative(root, f);
   const src = readFileSync(f, "utf8");
@@ -48,6 +51,16 @@ for (const f of files) {
       errors.push(`${rel}: appendVerified を呼べるのは hub の ledger / run だけ`);
     }
   }
+}
+
+for (const f of files) {
+  const rel = relative(root, f);
+  if (!/^packages\/hub\/src\/trace[^/]*\.ts$/.test(rel) && rel !== "packages/core/src/trace.ts") continue;
+  const src = readFileSync(f, "utf8");
+  for (const m of src.matchAll(/from\s+["']([^"']+)["']/g)) {
+    if (!TRACE_ALLOWED.has(m[1])) errors.push(`${rel}: 記録の道は ${m[1]} に依存できない（V-01）`);
+  }
+  if (/\bfetch\s*\(/.test(src)) errors.push(`${rel}: 記録の道は fetch を呼ばない（V-01）`);
 }
 
 if (errors.length) {

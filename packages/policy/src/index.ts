@@ -4,7 +4,7 @@
  * 取得先ごとの制限、上限値、締め切り、常設の方針、道具の説明文をここにまとめる。
  * 中身が変われば procedure_version（内容ハッシュ）が変わり、実行記録で比べられる（Q-05）。
  */
-import { LIMITS, DEFAULT_CAPS, DEFAULT_TOKEN_FACTORS, textHash, type Tier } from "@ai-research/core";
+import { LIMITS, TRACE_LIMITS, DEFAULT_CAPS, DEFAULT_TOKEN_FACTORS, textHash, type Tier } from "@ai-research/core";
 import { SANDBOX_TYPES } from "@ai-research/sandbox-api";
 
 export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent: number; timeoutMs?: number };
@@ -25,6 +25,11 @@ export const POLICY = {
     revalidateMs: 15_000,
   },
   limits: { ...LIMITS },
+  /**
+   * 調査の記録（docs/05）。見るための記録で、調査の結果には影響しない。
+   * retentionDays を過ぎた事象は消す（C-10）。flushBatch は RunDO から1回に送る事象の数
+   */
+  trace: { ...TRACE_LIMITS, retentionDays: 90, pruneEveryMs: 3_600_000, flushBatch: 200, maxEventsPerRun: 5_000 },
   caps: { ...DEFAULT_CAPS },
   tokenFactors: { ...DEFAULT_TOKEN_FACTORS },
   /** 取得先ごとの制限【暫定】。pattern はホスト名の末尾一致 */

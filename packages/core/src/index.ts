@@ -56,4 +56,17 @@ export {
   type BlockKind,
 } from "./blocks.ts";
 export { LIMITS, type Limits } from "./limits.ts";
+export {
+  TRACE_LIMITS,
+  TRACE_EVENT_TYPES,
+  sanitizeTraceEvent,
+  traceFields,
+  clipChars,
+  hostOf,
+  type TraceEvent,
+  type TraceEventType,
+  type TraceClaim,
+  type TraceLimits,
+  type TraceOrigin,
+} from "./trace.ts";
 export type { Source, SourceKind, Fingerprint, Volatility, ClaimStatusLabel, Tier, WorkMeta } from "./types.ts";

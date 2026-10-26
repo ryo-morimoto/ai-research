@@ -14,13 +14,14 @@
 | [docs/02-architecture.md](docs/02-architecture.md) | アーキテクチャと設計（v1.5） |
 | [docs/03-detailed-design-and-verification.md](docs/03-detailed-design-and-verification.md) | 詳細設計と検証方法（stage2）。Known Unknowns の確認結果と、結合試験で見つかったこと（§4） |
 | [docs/04-deploy-and-operations.md](docs/04-deploy-and-operations.md) | デプロイ、claude.ai への登録、運用、試験の動かし方 |
+| [docs/05-trace-and-view.md](docs/05-trace-and-view.md) | 調査の記録と見える化（v0.1）。要件・制約・設計の要約と、T0 で作った記録（TraceDO） |
 
 ## 構成
 
 ```text
-packages/core         純粋な関数（正規化、照合、段落選び、規則、予算）。性質ベーステストの主な対象
+packages/core         純粋な関数（正規化、照合、段落選び、規則、予算、記録の整形）。性質ベーステストの主な対象
 packages/policy       版つきの方針（取得先ごとの制限、上限値、道具の説明文）
-packages/hub          Worker：MCP の入口と OAuth、RunDO・LedgerDO・HostLimiterDO、取得の出口。test/ に workerd 上の結合試験
+packages/hub          Worker：MCP の入口と OAuth、RunDO・LedgerDO・HostLimiterDO・RouteDO・TraceDO、取得の出口。test/ に workerd 上の結合試験
 packages/sandbox-api  code mode でモデルに見せる型
 specs                 Quint の仕様（台帳、1つの調査、頻度制限）とわざと壊した版
 bench                 計測（試験用の依頼セット、呼び出し器。M3）

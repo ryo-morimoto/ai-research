@@ -12,12 +12,15 @@
       { "name": "LEDGER", "class_name": "LedgerDO" },
       { "name": "RUNS", "class_name": "RunDO" },
       { "name": "LIMITER", "class_name": "HostLimiterDO" },
-      { "name": "ROUTE", "class_name": "RouteDO" }
+      { "name": "ROUTE", "class_name": "RouteDO" },
+      { "name": "TRACE", "class_name": "TraceDO" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["LedgerDO", "RunDO", "HostLimiterDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["RouteDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["RouteDO"] },
+    // 調査の記録（docs/05）
+    { "tag": "v3", "new_sqlite_classes": ["TraceDO"] }
   ],
   "worker_loaders": [{ "binding": "LOADER" }],
   // OAuth の状態。KV 名前空間を cf で作り、id を差し替える（docs/04 §2.2）

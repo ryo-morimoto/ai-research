@@ -24,6 +24,8 @@ export default defineConfig({
 			RunDO: exports.durableObject({ storage: "sqlite" }),
 			HostLimiterDO: exports.durableObject({ storage: "sqlite" }),
 			RouteDO: exports.durableObject({ storage: "sqlite" }),
+			// 調査の記録（docs/05）
+			TraceDO: exports.durableObject({ storage: "sqlite" }),
 		},
 		env: {
 			SEARCH_PROVIDER: bindings.text("brave"),
@@ -52,6 +54,10 @@ export default defineConfig({
 			ROUTE: bindings.durableObject({
 				worker: "ai-research",
 				exportName: "RouteDO",
+			}),
+			TRACE: bindings.durableObject({
+				worker: "ai-research",
+				exportName: "TraceDO",
 			}),
 			// code mode の実行環境（Dynamic Workers）
 			LOADER: bindings.workerLoader(),

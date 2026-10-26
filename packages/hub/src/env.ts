@@ -3,6 +3,7 @@ import type { LedgerDO } from "./ledger.ts";
 import type { RunDO } from "./run.ts";
 import type { HostLimiterDO } from "./limiter.ts";
 import type { RouteDO } from "./route.ts";
+import type { TraceDO } from "./trace.ts";
 
 export interface Env {
   LEDGER: DurableObjectNamespace<LedgerDO>;
@@ -10,6 +11,8 @@ export interface Env {
   LIMITER: DurableObjectNamespace<HostLimiterDO>;
   /** 経路の判断（フックの受け口） */
   ROUTE: DurableObjectNamespace<RouteDO>;
+  /** 調査の記録（docs/05）。見るためのもので、調査の結果には影響しない */
+  TRACE: DurableObjectNamespace<TraceDO>;
   LOADER: WorkerLoader;
   OAUTH_KV: KVNamespace;
   OAUTH_PROVIDER: OAuthHelpers;
@@ -32,6 +35,8 @@ export interface Env {
   OPENALEX_API_KEY?: string;
   /** 連絡先（Crossref の polite pool と Unpaywall に送る。利用者が許した 2026-10-26。E-04） */
   CONTACT_EMAIL?: string;
+  /** 試験用：記録の書き込みを失敗させる（C-03 の試験） */
+  TEST_TRACE_FAIL?: string;
   /** 試験用：429・503 の冷却をしない */
   TEST_NO_BACKOFF?: string;
 }

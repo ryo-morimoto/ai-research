@@ -8,6 +8,7 @@ export { LedgerDO } from "./ledger.ts";
 export { RunDO } from "./run.ts";
 export { HostLimiterDO } from "./limiter.ts";
 export { RouteDO } from "./route.ts";
+export { TraceDO } from "./trace.ts";
 
 /**
  * ai-research のハブ（docs/02 §2）。
