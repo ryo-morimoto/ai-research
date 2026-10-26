@@ -157,24 +157,26 @@ export type HubError = { error: { code: HubErrorCode; retryable: boolean; messag
 
 /** モデルが読む型定義。道具の説明文に埋め込む */
 export const SANDBOX_TYPES = `
-type Source = { kind: "web" | "github" | "arxiv" | "work"; url: string; title?: string; locator: string;
+type Source = { kind: "web" | "github" | "arxiv" | "work"; url: string; title?: string; locator?: string;
   tier: "paper" | "official" | "encyclopedia" | "other"; work?: { authors: string[]; year?: number; venue?: string; doi?: string } };
 type Passage = { passageId: string; sourceId: string; text: string; context?: string };  // context は見出し（引用しない）
-type LedgerHit = { passageId: string; sourceId: string; excerpt: string; status: "引用確認済" | "照合中" | "照合失敗" | "取得できず未照合"; verifiedAt: string };
-type Bundle = { runId: string; sources: Record<string, Source>; ledgerHits: LedgerHit[]; passages: Passage[];
-  cutoffs: { what: string; why: string; detail?: string; urls?: string[] }[];
-  progress: Record<"searched" | "found" | "fetched" | "failed" | "running", number>;
-  done: boolean; notices: { kind: string; why?: string; next?: string }[] };
-type Claim = { text: string; cite: { passageId: string; quote: string }[] };
-type Status = { index: number; status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合"; reason?: string; nearest?: { text: string; score: number } };
+type Bundle = { runId: string; question: { version: number }; sources: Record<string, Source>; passages: Passage[];
+  ledgerHits: { passageId: string; sourceId: string; excerpt: string; status: string; verifiedAt: string }[];
+  pending: { what: string; since: string }[];
+  cutoffs: { what: string; why: string; detail?: string; urls?: string[]; sourceId?: string }[];
+  progress: Record<string, number>; done: boolean; notices: { kind: string; why?: string; next?: string }[] };
+type Status = { index: number; status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合";
+  reason?: string; next?: string; nearest?: { text: string; score: number } };
 type HubError = { error: { code: string; retryable: boolean; message: string; next: string } };
-type Q = { question: string; queries?: string[]; urls?: string[]; sources?: ("web" | "scholarly")[] };
+type Q = { question: string; queries?: string[]; urls?: string[]; sources?: ("web" | "scholarly")[]; waitMs?: number };
+type Extra = Promise<{ sources: Record<string, Source>; passages: Passage[]; notices: { kind: string }[] } | HubError>;
 
 declare const research: {
-  start(q: Q & { mode: "lookup" | "survey" }): Promise<Bundle | HubError>;
+  start(q: Q & { mode: "lookup" | "survey"; maxPassages?: number }): Promise<Bundle | HubError>;   // 最大 survey 25秒・lookup 15秒
   next(runId: string, opts?: { waitMs?: number }): Promise<Bundle | HubError>;
-  around(runId: string, passageId: string, opts?: { before?: number; after?: number }): Promise<{ sources; passages: Passage[] } | HubError>;
-  verify(runId: string, claims: Claim[]): Promise<{ statuses: Status[] } | HubError>;
+  around(runId: string, passageId: string, opts?: { before?: 0 | 1 | 2 | 3; after?: 0 | 1 | 2 | 3 }): Extra;
+  find(runId: string, sourceIdOrUrl: string, text: string): Extra;
+  verify(runId: string, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<{ statuses: Status[] } | HubError>;
   steer(runId: string, q: Q): Promise<Bundle | HubError>;
   deepen(runId: string): Promise<Bundle | HubError>;
 };
