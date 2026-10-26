@@ -10,8 +10,8 @@
 
 | 文書 | 中身 |
 |---|---|
-| [docs/01-requirements-and-constraints.md](docs/01-requirements-and-constraints.md) | やりたいことと制約（v0.8） |
-| [docs/02-architecture.md](docs/02-architecture.md) | アーキテクチャと設計（v1.4） |
+| [docs/01-requirements-and-constraints.md](docs/01-requirements-and-constraints.md) | やりたいことと制約（v0.9） |
+| [docs/02-architecture.md](docs/02-architecture.md) | アーキテクチャと設計（v1.5） |
 | [docs/03-detailed-design-and-verification.md](docs/03-detailed-design-and-verification.md) | 詳細設計と検証方法（stage2）。Known Unknowns の確認結果と、結合試験で見つかったこと（§4） |
 | [docs/04-deploy-and-operations.md](docs/04-deploy-and-operations.md) | デプロイ、claude.ai への登録、運用、試験の動かし方 |
 
@@ -28,10 +28,11 @@ bench                 計測（試験用の依頼セット、呼び出し器。M
 
 ## 状態
 
-Cloudflare にデプロイし、claude.ai のカスタムコネクタとプラグインから使っている。設計 v1.4（論文の書誌と抄録、作業が尽きたら終わる、関連の絶対の下限、照合の状態の名前）まで実装した。計測は [docs/02](docs/02-architecture.md) §8.1.6・§8.2.9。
+Cloudflare にデプロイし、claude.ai のカスタムコネクタとプラグインから使っている。設計 v1.5（進行中と喪失の区別、段落が選ばれない出典の find、論文の PDF と公開の版、拒まれたときの冷却、フックの送るものの最小化と版の検知、結果のラベル）まで実装した。計測は [docs/02](docs/02-architecture.md) §8.1.6・§8.2.9・§8.3.10。
 
-- 論文・研究の知見は `sources: ["scholarly", "web"]` で、Europe PMC と Crossref（キー不要）から書誌と抄録を引く。出版社のページが拒んだら URL の DOI に回る
-- 照合の状態は「引用確認済」「照合失敗」「未照合」など。表すのは引用が原文にあるかだけで、主張の正しさではない
+- 論文・研究の知見は `sources: ["scholarly", "web"]` で、Europe PMC・Crossref・OpenAlex・Semantic Scholar から書誌と抄録を引き、公開の版（PDF を含む）があれば本文も読む。出版社のページが拒んだら URL の DOI に回る
+- 結果のラベルは「引用確認済・種類」「書誌のみ」「未照合」「背景知識」「経路外（理由）」。表すのは引用が原文にあるかだけで、主張の正しさではない
+- プラグインのフックが送るものと残すものは [plugins/ai-research/README.md](plugins/ai-research/README.md) の表に書いた
 
 ## 使い方（claude.ai のアカウントに3つ登録する）
 
