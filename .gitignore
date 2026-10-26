@@ -11,3 +11,4 @@ bench/results/
 .cloudflare/
 .secrets.env
 *.secrets.env
+__pycache__/
