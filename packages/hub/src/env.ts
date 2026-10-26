@@ -28,4 +28,6 @@ export interface Env {
   TEST_DEADLINES?: string;
   /** 試験用：予算の上限の縮尺（1 なら方針どおり） */
   TEST_CAP_SCALE?: string;
+  /** 試験用：429・503 の冷却をしない */
+  TEST_NO_BACKOFF?: string;
 }

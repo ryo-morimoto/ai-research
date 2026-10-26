@@ -86,3 +86,50 @@ describe("頻度制限（HostLimiterDO）", () => {
     expect(r.some((x) => x instanceof Error && /上限/.test(x.message))).toBe(true);
   });
 });
+
+import { env as testEnv } from "cloudflare:test";
+import { Gateway } from "../src/gateway.ts";
+import { upstreamLog, upstreamSet } from "./helpers.ts";
+import { providers } from "../src/sandbox.ts";
+
+describe("拒まれたときの冷却と、並べて呼ぶ上限（設計 v1.5 §8.3.5、制約 E-02）", () => {
+  it("429 と Retry-After を受けたら、その取得先への取得を全体で空け、締め切りに収まれば1回だけ取り直す", async () => {
+    await upstreamSet({ url: "https://busy.example.org/a", status: 429, headers: { "retry-after": "2" }, body: "slow down" });
+    await upstreamSet({ url: "https://busy.example.org/b", contentType: "text/html", body: "<p>別のページの本文です。十分な長さの文にしておく。</p>" });
+    const gw = new Gateway(testEnv);
+    const t0 = Date.now();
+    const r = await gw.fetchDoc("https://busy.example.org/a");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.cutoff.why).toBe("blocked");
+      expect(r.cutoff.detail).toContain("429");
+    }
+    const b = await gw.fetchDoc("https://busy.example.org/b");
+    expect(b.ok).toBe(true);
+    const log = (await upstreamLog()).filter((l) => l.url.startsWith("https://busy.example.org/") && !l.url.endsWith("robots.txt"));
+    const a = log.filter((l) => l.url.endsWith("/a"));
+    expect(a).toHaveLength(2);
+    // 2秒（方針の時間）の冷却が、取り直しと別のページの両方に効いている
+    const scale = Number(testEnv.TEST_TIME_SCALE);
+    expect(a[1]!.at - a[0]!.at).toBeGreaterThanOrEqual(2_000 * scale - 5);
+    const bReq = log.find((l) => l.url.endsWith("/b"))!;
+    expect(bReq.at - a[0]!.at).toBeGreaterThanOrEqual(2_000 * scale - 5);
+    void t0;
+  });
+
+  it("冷却が取得1件の締め切りより長ければ、取り直さずに blocked（再開を求められたことを書く）", async () => {
+    await upstreamSet({ url: "https://busy2.example.org/a", status: 429, headers: { "retry-after": "120" }, body: "" });
+    const r = await new Gateway(testEnv).fetchDoc("https://busy2.example.org/a");
+    expect(!r.ok && r.cutoff.detail).toContain("120");
+    expect((await upstreamLog()).filter((l) => l.url === "https://busy2.example.org/a")).toHaveLength(1);
+  });
+
+  it("1回の code で start は5つまで。6つ目は busy と次の手（例外にしない）", async () => {
+    const [research] = providers(testEnv);
+    const fns = research!.fns as Record<string, (...a: unknown[]) => Promise<any>>;
+    const rs = await Promise.all(Array.from({ length: 6 }, (_, i) => fns.start!({ question: `問い ${i}`, mode: "lookup", urls: ["https://docs.example.com/cache"] })));
+    expect(rs.filter((r) => r.error).length).toBe(1);
+    expect(rs.find((r) => r.error)!.error).toMatchObject({ code: "busy", retryable: true });
+    expect(rs.find((r) => r.error)!.error.next).toContain("次の code");
+  });
+});

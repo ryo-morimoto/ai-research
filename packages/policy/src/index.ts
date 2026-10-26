@@ -39,6 +39,13 @@ export const POLICY = {
   ] satisfies HostPolicy[],
   defaultHost: { pattern: "*", minIntervalMs: 1_000, maxConcurrent: 2 } satisfies HostPolicy,
   leaseTtlMs: 60_000,
+  /**
+   * 取得先に拒まれた（429・503）ときの冷却（設計 v1.5 §8.3.5、E-02）。Retry-After に従い、なければ defaultMs。
+   * 冷却が取得1件の締め切り（deadlines.fetchMs）に収まるときだけ、1回待って取り直す
+   */
+  backoff: { defaultMs: 30_000, minMs: 1_000, maxMs: 300_000, statuses: [429, 503] },
+  /** 並べて呼ぶ目安（設計 v1.5 §8.3.5）。1回の code で始められる調査の数 */
+  fanout: { maxStartsPerCode: 5 },
   /** 自動取得を禁じる取得先（E-02） */
   forbiddenHosts: ["youtube.com", "youtu.be", "m.youtube.com"],
   /**

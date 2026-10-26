@@ -2,7 +2,7 @@ import { attachLeadIns, blocksFromMarkdown, blocksFromPlainText, docText, markRe
 import { POLICY, isForbidden, isExcluded, isPreferred } from "@ai-research/policy";
 import type { Cutoff } from "@ai-research/sandbox-api";
 import type { Env } from "./env.ts";
-import { withLease, LeaseTimeout } from "./limiter.ts";
+import { withLease, LeaseTimeout, cooldownHost } from "./limiter.ts";
 import { parseRobots, isAllowed, type RobotsRules } from "./robots.ts";
 import { extractHtml, metaRefreshTarget } from "./extract.ts";
 import { deadlines, timeScale } from "./time.ts";
@@ -110,8 +110,20 @@ export class Gateway {
     return this.opts.timeoutMs ?? deadlines(this.env).fetchMs;
   }
 
-  /** 外への1回の取得。頻度制限・時間上限つき */
+  /**
+   * 外への1回の取得。頻度制限・時間上限つき。
+   * 429・503 なら取得先を冷却し（全体で間を空ける）、冷却が取得1件の締め切りに収まるときだけ1回取り直す（設計 v1.5 §8.3.5）
+   */
   private async raw(url: string, init: RequestInit = {}): Promise<Response> {
+    const host = new URL(url).hostname;
+    const r = await this.rawOnce(url, init);
+    if (!(POLICY.backoff.statuses as readonly number[]).includes(r.status) || this.env.TEST_NO_BACKOFF) return r;
+    const c = await cooldownHost(this.env, host, r.headers.get("retry-after"));
+    if (c.ms > deadlines(this.env).fetchMs || this.opts.signal?.aborted) return r;
+    return this.rawOnce(url, init);
+  }
+
+  private async rawOnce(url: string, init: RequestInit = {}): Promise<Response> {
     const host = new URL(url).hostname;
     const controller = new AbortController();
     const onAbort = () => controller.abort();
@@ -303,8 +315,9 @@ export class Gateway {
     if (conditional?.lastModified) headers["If-Modified-Since"] = conditional.lastModified;
     const r = await this.raw(url, { headers });
     if (r.status === 304 && conditional) return { ok: true, notModified: true, fingerprint: conditional };
-    if (r.status === 401 || r.status === 403 || r.status === 429) {
-      return this.fail(url, { what: url, why: "blocked", detail: `HTTP ${r.status}` });
+    if (r.status === 401 || r.status === 403 || r.status === 429 || r.status === 503) {
+      const ra = r.headers.get("retry-after");
+      return this.fail(url, { what: url, why: "blocked", detail: `HTTP ${r.status}${ra ? `（取得先が ${ra} 後の再開を求めた。ハブは間を空ける）` : ""}` });
     }
     if (r.status === 404 || r.status === 410) return this.fail(url, { what: url, why: "not_found", detail: `HTTP ${r.status}` });
     if (!r.ok) return this.fail(url, { what: url, why: "error", detail: `HTTP ${r.status}` });

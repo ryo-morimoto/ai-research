@@ -1,6 +1,6 @@
 import type { ResolvedProvider, Executor } from "@cloudflare/codemode";
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
-import type { Bundle, ClaimInput, Notice, QuestionInput } from "@ai-research/sandbox-api";
+import type { Bundle, ClaimInput, HubError, Notice, QuestionInput } from "@ai-research/sandbox-api";
 import { POLICY, tierOf } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
@@ -28,14 +28,29 @@ function guarded(fn: (...args: unknown[]) => Promise<unknown>, runIdOf?: (args: 
   };
 }
 
+function tooManyStarts(): HubError {
+  const n = POLICY.fanout.maxStartsPerCode;
+  return {
+    error: {
+      code: "busy",
+      retryable: true,
+      message: `1回の code で始められる調査（start）は ${n} つまで（取得先への負荷を抑えるため）`,
+      next: `残りの start は次の code で呼ぶ。先に ${n} つ start して、結果は next でまとめて受け取れる。`,
+    },
+  };
+}
+
 const firstArg = (args: unknown[]) => (typeof args[0] === "string" ? args[0] : undefined);
 const notFound = (b: { notices?: { kind: string }[] }, runId: string) =>
   b.notices?.some((n) => n.kind === "run_not_found") ? runNotFound(runId) : b;
 
 export function providers(env: Env, client?: string): ResolvedProvider[] {
+  // 1回の code で始められる調査の数（設計 v1.5 §8.3.5）。providers は code の呼び出しごとに作られる
+  let starts = 0;
   const research: Record<string, Fn> = {
     start: guarded(async (q: unknown) => {
       const input = parse(StartInput, q, "start") as QuestionInput;
+      if (++starts > POLICY.fanout.maxStartsPerCode) return tooManyStarts();
       const runId = `run_${crypto.randomUUID()}`;
       await routeStub(env).noteResearchStart().catch(() => {});
       return runStub(env, runId).start(runId, input, client);

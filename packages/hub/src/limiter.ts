@@ -22,21 +22,24 @@ export type AcquireResult = { granted: true; leaseId: string; startAt: number; n
 export class HostLimiterDO extends DurableObject<Env> {
   private leases: Lease[] = [];
   private lastStart = Number.NEGATIVE_INFINITY;
+  /** 取得先に間を空けるよう求められた（429・503）ときの、再開の時刻（実時間。設計 v1.5 §8.3.5） */
+  private cooldownUntil = 0;
   private starts: number[] = [];
   private loaded = false;
 
   private async load(): Promise<void> {
     if (this.loaded) return;
-    const s = await timed("limiter.load", () => this.ctx.storage.get<{ lastStart: number; starts: number[] }>("state"));
+    const s = await timed("limiter.load", () => this.ctx.storage.get<{ lastStart: number; starts: number[]; cooldownUntil?: number }>("state"));
     if (s) {
       this.lastStart = s.lastStart;
       this.starts = s.starts;
+      this.cooldownUntil = s.cooldownUntil ?? 0;
     }
     this.loaded = true;
   }
 
   private async save(): Promise<void> {
-    const state = { lastStart: this.lastStart, starts: this.starts.slice(-200) };
+    const state = { lastStart: this.lastStart, starts: this.starts.slice(-200), cooldownUntil: this.cooldownUntil };
     await timed("limiter.save", () => this.ctx.storage.put("state", state));
   }
 
@@ -51,13 +54,24 @@ export class HostLimiterDO extends DurableObject<Env> {
       const soonest = Math.min(...this.leases.map((l) => l.expiresAt));
       return { granted: false, retryAfterMs: Math.max(1, Math.min(soonest - now, 1_000 * scale)) };
     }
-    const startAt = Math.max(now, this.lastStart + minInterval);
+    const startAt = Math.max(now, this.lastStart + minInterval, this.cooldownUntil);
     const lease: Lease = { leaseId: crypto.randomUUID(), startAt, expiresAt: startAt + ttlMs * scale };
     this.leases.push(lease);
     this.lastStart = startAt;
     this.starts.push(startAt);
     await this.save();
     return { granted: true, leaseId: lease.leaseId, startAt, now };
+  }
+
+  /** 取得先が間を空けるよう求めた。ms（方針の時間）のあいだ、全体でその取得先への取得を止める。再開の時刻（実時間）を返す */
+  async cooldown(ms: number): Promise<number> {
+    await this.load();
+    const until = Date.now() + ms * timeScale(this.env);
+    if (until > this.cooldownUntil) {
+      this.cooldownUntil = until;
+      await this.save();
+    }
+    return this.cooldownUntil;
   }
 
   async release(leaseId: string): Promise<void> {
@@ -70,6 +84,26 @@ export class HostLimiterDO extends DurableObject<Env> {
     await this.load();
     return { starts: [...this.starts], active: this.leases.length, scale: timeScale(this.env) };
   }
+}
+
+/**
+ * 取得先が 429・503 を返したときの冷却（設計 v1.5 §8.3.5）。Retry-After（秒か日時）に従う。なければ既定、上限つき。
+ * 返すのは冷却の長さ（方針の時間）と再開の時刻
+ */
+export async function cooldownHost(env: Env, host: string, retryAfter: string | null): Promise<{ ms: number; until: number }> {
+  const P = POLICY.backoff;
+  let ms: number = P.defaultMs;
+  if (retryAfter) {
+    const sec = Number(retryAfter);
+    if (Number.isFinite(sec)) ms = sec * 1_000;
+    else {
+      const at = Date.parse(retryAfter);
+      if (Number.isFinite(at)) ms = at - Date.now();
+    }
+  }
+  ms = Math.min(P.maxMs, Math.max(P.minMs, ms));
+  const stub = env.LIMITER.get(env.LIMITER.idFromName(host.toLowerCase()));
+  return { ms, until: await stub.cooldown(ms) };
 }
 
 export class LeaseTimeout extends Error {
