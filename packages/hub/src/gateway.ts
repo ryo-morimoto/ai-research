@@ -109,11 +109,13 @@ export class Gateway {
     /** 同じ実行の中で失敗した URL（INV-14）。withSignal で作った出口とも共有する */
     readonly failed = new Set<string>(),
     private robots = new Map<string, RobotsRules | null>(),
+    /** 同じ実行の中で同じ論文を同時に引いたら、1回の取得を分け合う（照らし直しと取得が重なる） */
+    private works = new Map<string, Promise<FetchResult>>(),
   ) {}
 
   /** 同じ実行の出口を、作業ごとの中止の合図つきで使う（方向を変えたら古い作業の取得を止める） */
   withSignal(signal: AbortSignal): Gateway {
-    return new Gateway(this.env, { ...this.opts, signal }, this.failed, this.robots);
+    return new Gateway(this.env, { ...this.opts, signal }, this.failed, this.robots, this.works);
   }
 
   private get timeoutMs(): number {
@@ -205,7 +207,8 @@ export class Gateway {
   }
 
   /** 出典を取得する。conditional を渡すと条件付きで取得し、変わっていなければ notModified */
-  async fetchDoc(url: string, conditional?: Fingerprint): Promise<FetchResult> {
+  /** forCheck：照らし直し・照合のための取り直し（論文の公開の版は探さない。抄録は同じ規則で補う） */
+  async fetchDoc(url: string, conditional?: Fingerprint, opts: { forCheck?: boolean } = {}): Promise<FetchResult> {
     if (this.failed.has(url)) return { ok: false, cutoff: { what: url, why: "error", detail: "同じ実行の中で失敗済み" } };
     const pc = this.policyCutoff(url);
     if (pc) return this.fail(url, pc);
@@ -213,7 +216,15 @@ export class Gateway {
     try {
       if (c.kind === "github") return await this.fetchGithub(c);
       if (c.kind === "arxiv") return await this.fetchArxiv(c);
-      if (c.kind === "work") return await this.fetchWork(c);
+      if (c.kind === "work") {
+        const key = `${c.doi ?? c.epmc?.id}:${opts.forCheck ? "check" : "full"}`;
+        let p = this.works.get(key);
+        if (!p) {
+          p = this.fetchWork(c, !opts.forCheck);
+          this.works.set(key, p);
+        }
+        return await p;
+      }
       const r = await this.fetchWeb(c.url, conditional);
       // 出版社のページが取れなくても、URL に DOI があれば書誌と抄録に取り直す（設計 v1.4 §8.2.2）
       const doi = !r.ok && r.cutoff.why !== "policy" ? doiOf(new URL(url).pathname) : null;
@@ -283,7 +294,7 @@ export class Gateway {
   }
 
   /** 論文を DOI か Europe PMC の識別で引く。Europe PMC と Crossref を並べて引き、1つにまとめる */
-  private async fetchWork(c: Extract<Classified, { kind: "work" }>): Promise<FetchResult> {
+  private async fetchWork(c: Extract<Classified, { kind: "work" }>, oa = true): Promise<FetchResult> {
     const q = c.doi ? `DOI:"${c.doi}"` : `EXT_ID:${c.epmc!.id} AND SRC:${c.epmc!.source}`;
     const [ej, cj] = await Promise.all([
       this.json(epmcSearchUrl(q, 1)).catch(() => null),
@@ -294,7 +305,12 @@ export class Gateway {
     const w = works[0];
     if (!w) return this.fail(c.url, { what: c.url, why: "not_found", detail: "書誌が見つからない（Europe PMC、Crossref）" });
     // DOI で引いた論文は、抄録と公開の版を補う（設計 v1.5 §8.3.4）
-    return { ok: true, doc: await this.workDoc(await this.enrich(w, { oa: true })) };
+    // 補うのに時間の上限を付ける。間に合わなければ、補わずに返す（lookup の締め切りを守る）
+    const enriched = await Promise.race([
+      this.enrich(w, { oa }),
+      new Promise<Work>((resolve) => setTimeout(() => resolve(w), POLICY.scholarly.enrichTimeoutMs * timeScale(this.env))),
+    ]);
+    return { ok: true, doc: await this.workDoc(enriched) };
   }
 
   async workDoc(w: Work): Promise<Doc> {

@@ -130,6 +130,8 @@ export const POLICY = {
     enrichMax: 4,
     /** 1つの論文から読みに行く公開の版の候補の数 */
     relatedMax: 2,
+    /** DOI で引いた論文の抄録・公開の版を補う時間の上限（間に合わなければ補わずに返す） */
+    enrichTimeoutMs: 5_000,
   },
   /** PDF の読み取り（設計 v1.5 §8.3.4）。大きさ・ページ数・時間の上限 */
   pdf: { maxBytes: 10_000_000, maxPages: 60, timeoutMs: 5_000 },

@@ -492,7 +492,7 @@ export class RunDO extends DurableObject<Env> {
         }
       }
     }
-    const r = await gw.fetchDoc(rec.url, method === "conditional-get" ? rec.fingerprint : undefined);
+    const r = await gw.fetchDoc(rec.url, method === "conditional-get" ? rec.fingerprint : undefined, { forCheck: true });
     if (!r.ok) return finish("取得できず未照合", `取得できない（${r.cutoff.why}）`);
     if ("notModified" in r) {
       if (judgeRevalidation(rec.fingerprint, { method: "conditional-get", status: 304 }) === "unchanged") return markUnchanged(rec.fingerprint);
@@ -1044,7 +1044,7 @@ export class RunDO extends DurableObject<Env> {
     if (para && s) return { ok: true, text: para.text, source: s.doc.source, fingerprint: s.doc.fingerprint };
     // 退避でメモリの原文を失ったときは取り直す（INV-13 と両立させる）。
     // 取り直した原文で同じ位置の段落を使う。原文が変わっていれば照合に失敗する（安全側）
-    const r = await this.gw().fetchDoc(pm!.url);
+    const r = await this.gw().fetchDoc(pm!.url, undefined, { forCheck: true });
     if (r.ok && "doc" in r) {
       const again = candidateParagraphs(pm!.sourceId, r.doc.blocks).find((x) => x.index === pm!.index);
       if (again) return { ok: true, text: again.text, source: r.doc.source, fingerprint: r.doc.fingerprint };
