@@ -62,6 +62,7 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       const q2: { question: string; queries: string[]; urls?: string[]; sources?: ("web" | "scholarly")[] } = { question: input.question, queries: input.queries ?? [] };
       if (input.urls) q2.urls = input.urls;
       if (input.sources) q2.sources = input.sources;
+      if (input.waitMs !== undefined) (q2 as { waitMs?: number }).waitMs = input.waitMs;
       return notFound((await runStub(env, id).steer(q2)) as Bundle, id);
     }, firstArg),
     deepen: guarded(async (runId: unknown) => {

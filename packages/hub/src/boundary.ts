@@ -16,12 +16,19 @@ export const StartInput = z.object({
   question: str,
   mode: z.enum(["lookup", "survey"]),
   sources: sourceSet,
+  waitMs: z.number().min(0).max(60_000).optional(),
   scope: z.string().optional(),
   exclusions: z.array(z.string()).max(16).optional(),
   queries: strList,
   urls: z.array(z.string().url()).max(8).optional(),
 });
-export const SteerInput = z.object({ question: str, queries: strList, urls: z.array(z.string().url()).max(8).optional(), sources: sourceSet });
+export const SteerInput = z.object({
+  question: str,
+  queries: strList,
+  urls: z.array(z.string().url()).max(8).optional(),
+  sources: sourceSet,
+  waitMs: z.number().min(0).max(60_000).optional(),
+});
 export const ClaimsInput = z
   .array(z.object({ text: z.string(), cite: z.array(z.object({ passageId: z.string(), quote: z.string() })).max(8) }))
   .max(50);

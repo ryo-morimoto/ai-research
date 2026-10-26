@@ -32,6 +32,7 @@ import type {
   LedgerHit,
   Notice,
   Passage,
+  Pending,
   Progress,
   QuestionInput,
   SourceRef,
@@ -64,9 +65,10 @@ type HitEntry = {
   passageId: string;
   v: number;
   record: LedgerRecord;
-  status: LedgerHit["status"];
+  /** 照合中は内部だけの状態。束には決着してから出す（設計 v1.5 §8.3.2） */
+  status: LedgerHit["status"] | "照合中";
   reason?: string;
-  deliveredStatus: LedgerHit["status"] | null;
+  deliveredStatus: LedgerHit["status"] | "照合中" | null;
   /** 照らし直せたときの、照合に使える原文（抜き書きと前後の文脈） */
   verifiedText?: string;
   fingerprint?: Fingerprint;
@@ -386,7 +388,7 @@ export class RunDO extends DurableObject<Env> {
     const rec = hit.record;
     const method = planRevalidation(rec.kind, rec.volatility);
     const gw = this.gw().withSignal(signal);
-    const finish = (status: LedgerHit["status"], reason?: string) => {
+    const finish = (status: HitEntry["status"], reason?: string) => {
       if (!this.current(v)) return;
       hit.status = status;
       if (reason) hit.reason = reason;
@@ -461,7 +463,7 @@ export class RunDO extends DurableObject<Env> {
   private hasNews(v: number): boolean {
     return (
       [...this.paras.values()].some((p) => p.v === v && !p.delivered) ||
-      [...this.hits.values()].some((h) => h.v === v && h.deliveredStatus !== h.status) ||
+      [...this.hits.values()].some((h) => h.v === v && h.status !== "照合中" && h.deliveredStatus !== h.status) ||
       this.cutoffs.some((c) => c.v === v && !c.delivered)
     );
   }
@@ -491,7 +493,7 @@ export class RunDO extends DurableObject<Env> {
     const hitSources: Record<string, SourceRef> = {};
     const hitSourceByUrl = new Map<string, string>();
     const hitsOut: LedgerHit[] = [...this.hits.values()]
-      .filter((h) => h.v === v && h.deliveredStatus !== h.status)
+      .filter((h) => h.v === v && h.status !== "照合中" && h.deliveredStatus !== h.status)
       .map((h) => {
         // 同じ URL の候補は、出典を1つにまとめる
         const sid = hitSourceByUrl.get(h.record.url) ?? h.passageId;
@@ -507,24 +509,22 @@ export class RunDO extends DurableObject<Env> {
           passageId: h.passageId,
           sourceId: sid,
           excerpt: h.record.excerpt,
-          status: h.status,
+          status: h.status as LedgerHit["status"],
           verifiedAt: h.record.verifiedAt,
         };
         if (h.reason) out.reason = h.reason;
         return out;
       });
 
-    // INV-8：締め切りで終わっていない現在の版の作業を、すべて cutoffs に入れる
-    const running = this.unfinished(v).map((t) => ({
-      origin: t.origin,
-      cutoff: {
-        what: t.url ?? t.label,
-        why: "timeout",
-        detail: m.done ? "締め切りで打ち切った" : "締め切りまでに終わらず、続けて集めている",
-      } as Cutoff,
-    }));
+    // INV-8（設計 v1.5 §8.3.2）：締め切りで終わっていない現在の版の作業は、
+    // done でなければ pending（まだ集めている）、done なら cutoffs（gave_up）に必ず入れる
+    const unfinished = this.unfinished(v);
+    const pending: Pending[] = m.done ? [] : unfinished.map((t) => ({ what: t.url ?? t.label, since: new Date(t.startedAt).toISOString() }));
+    const gaveUp = m.done
+      ? unfinished.map((t) => ({ origin: t.origin, cutoff: { what: t.url ?? t.label, why: "gave_up", detail: "調査の終わりまでに終わらなかった" } as Cutoff }))
+      : [];
     const pendingCutoffs = this.cutoffs.filter((c) => c.v === v && !c.delivered);
-    const cutoffItems = [...pendingCutoffs.map((c) => ({ cutoff: c.cutoff, origin: c.origin })), ...running];
+    const cutoffItems = [...pendingCutoffs.map((c) => ({ cutoff: c.cutoff, origin: c.origin })), ...gaveUp];
     // 答えに影響しうるものは1件ずつ、検索で見つけたページの失敗はまとめる（Q-04）
     const cutoffs = presentCutoffs(cutoffItems);
 
@@ -535,6 +535,7 @@ export class RunDO extends DurableObject<Env> {
       sources: { ...hitSources },
       ledgerHits: hitsOut,
       passages: [],
+      pending,
       cutoffs,
       progress: this.progressNow(v),
       done: m.done,
@@ -615,7 +616,9 @@ export class RunDO extends DurableObject<Env> {
       passages: bundle.passages.map((p) => p.passageId),
       passageVersions: bundle.passages.map((p) => this.paras.get(p.passageId)?.v ?? -1),
       hits: bundle.ledgerHits.map((h) => h.passageId),
-      cutoffTasks: this.unfinished(v).map((t) => t.id),
+      unfinishedTasks: unfinished.map((t) => t.id),
+      done: m.done,
+      pending: pending.length,
       cutoffs: bundle.cutoffs.length,
       cutoffItems: cutoffItems.length,
       used: m.budget.used,
@@ -691,13 +694,15 @@ export class RunDO extends DurableObject<Env> {
     this.log("start", { v: 1 });
     await timed("run.setAlarm", () => this.ctx.storage.setAlarm(Date.now() + deadlines(this.env).continueUntilMs * timeScale(this.env)));
     this.launch(1, { queries, urls, question });
-    return this.firstBundle(1);
+    return this.firstBundle(1, input.waitMs);
   }
 
-  private async firstBundle(v: number): Promise<Bundle> {
+  /** 最初の束。待つのは種類の締め切り（startMs）まで。waitMs があればそれより短く（設計 v1.5 §8.3.2） */
+  private async firstBundle(v: number, waitMs?: number): Promise<Bundle> {
     const m = this.meta!;
     const mode = POLICY.modes[m.mode];
-    await this.waitUntil(() => !this.current(v) || this.unfinished(v).length === 0, mode.startMs);
+    const wait = waitMs === undefined ? mode.startMs : Math.min(mode.startMs, Math.max(0, waitMs));
+    await this.waitUntil(() => !this.current(v) || this.unfinished(v).length === 0, wait);
     // 続きを集めない種類（lookup）は、最初の束で終える。残りの作業は止める（設計 v1.3 §8.1.2）
     const ends = !mode.continues && !m.deep;
     if (ends) this.finish("lookup");
@@ -727,7 +732,7 @@ export class RunDO extends DurableObject<Env> {
     return b;
   }
 
-  async steer(input: { question: string; queries: string[]; urls?: string[]; sources?: SourceSet[] }): Promise<Bundle> {
+  async steer(input: { question: string; queries: string[]; urls?: string[]; sources?: SourceSet[]; waitMs?: number }): Promise<Bundle> {
     const m = await this.load();
     if (!m) return this.notFoundBundle("", { kind: "run_not_found" });
     const question = String(input.question ?? "").trim() || m.question;
@@ -748,7 +753,7 @@ export class RunDO extends DurableObject<Env> {
     for (const s of [...this.sources.values()].filter((x) => x.v === old)) this.addDoc(v, s.doc);
     this.log("steer", { v });
     this.launch(v, { queries, urls, question });
-    return this.firstBundle(v);
+    return this.firstBundle(v, input.waitMs);
   }
 
   async deepen(): Promise<Bundle> {
@@ -915,6 +920,13 @@ export class RunDO extends DurableObject<Env> {
     const m = this.meta!;
     if (m.done) return;
     m.done = true;
+    // 決着していない台帳の候補は、取り直せなかったものとして決着させる（照合中を外に出さない）
+    for (const h of this.hits.values()) {
+      if (h.v === m.version && h.status === "照合中") {
+        h.status = "取得できず未照合";
+        h.reason = "調査の終わりまでに照らし直せなかった";
+      }
+    }
     this.log("finish", { v: m.version, why, unfinished: this.unfinished(m.version).map((t) => t.id) });
     this.notify();
   }
@@ -950,6 +962,7 @@ export class RunDO extends DurableObject<Env> {
       sources: {},
       ledgerHits: [],
       passages: [],
+      pending: [],
       cutoffs: [],
       progress: { searched: 0, found: 0, fetched: 0, failed: 0, running: 0 },
       done: true,

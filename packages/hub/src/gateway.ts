@@ -266,7 +266,7 @@ export class Gateway {
     const sha = (await this.githubLatestCommit(c.owner, c.repo, c.path, c.ref).catch(() => null)) ?? null;
     const rawUrl = `https://raw.githubusercontent.com/${c.owner}/${c.repo}/${sha ?? c.ref}/${c.path}`;
     const r = await this.raw(rawUrl);
-    if (!r.ok) return this.fail(c.url, { what: c.url, why: r.status === 404 ? "error" : "blocked", detail: `HTTP ${r.status}` });
+    if (!r.ok) return this.fail(c.url, { what: c.url, why: r.status === 404 ? "not_found" : "blocked", detail: `HTTP ${r.status}` });
     const body = (await r.text()).slice(0, MAX_BODY_CHARS);
     const { blocks } = toBlocks(body, isMarkdownPath(c.path) ? "markdown" : "plain", rawUrl);
     const source: Source = { kind: "github", url: c.url, title: `${c.owner}/${c.repo}/${c.path}`, locator: `${c.owner}/${c.repo}@${sha ?? c.ref}:${c.path}` };
@@ -306,6 +306,7 @@ export class Gateway {
     if (r.status === 401 || r.status === 403 || r.status === 429) {
       return this.fail(url, { what: url, why: "blocked", detail: `HTTP ${r.status}` });
     }
+    if (r.status === 404 || r.status === 410) return this.fail(url, { what: url, why: "not_found", detail: `HTTP ${r.status}` });
     if (!r.ok) return this.fail(url, { what: url, why: "error", detail: `HTTP ${r.status}` });
     const ct = r.headers.get("content-type") ?? "";
     if (/pdf/i.test(ct)) return this.fail(url, { what: url, why: "unsupported", detail: "PDF は未対応" });

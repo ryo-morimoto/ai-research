@@ -59,9 +59,11 @@ export function checkRunTrace(events: Ev[], opts: { timeScale: number; continueU
         const pv = e.passageVersions as number[];
         for (const x of pv) expect(x, "INV-10：束の段落は現在の版のもの").toBe(v);
         const runningNow = [...running.entries()].filter(([, tv]) => tv === v).map(([id]) => id).sort((a, b) => a - b);
-        const reported = [...(e.cutoffTasks as number[])].sort((a, b) => a - b);
-        expect(reported, "INV-8：終わっていない作業はすべて打ち切りとして数える").toEqual(runningNow);
-        expect((e.cutoffItems ?? e.cutoffs) as number, "INV-8：束の cutoffs に入っている（まとめる前の件数）").toBeGreaterThanOrEqual(runningNow.length);
+        const reported = [...(e.unfinishedTasks as number[])].sort((a, b) => a - b);
+        expect(reported, "INV-8：終わっていない作業をすべて数える").toEqual(runningNow);
+        // INV-8（設計 v1.5 §8.3.2）：done でなければ pending に、done なら cutoffs（gave_up）に入っている
+        if (e.done) expect(e.cutoffItems as number, "INV-8：done なら cutoffs に入っている（まとめる前の件数）").toBeGreaterThanOrEqual(runningNow.length);
+        else expect(e.pending as number, "INV-8：done でなければ pending に入っている").toBe(runningNow.length);
         expect(e.used as number, "INV-9：使用量は段階の上限を超えない").toBeLessThanOrEqual(e.cap as number);
         break;
       }

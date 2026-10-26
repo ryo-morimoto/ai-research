@@ -6,7 +6,7 @@ import type { RunDO } from "../src/run.ts";
 import { POLICY } from "@ai-research/policy";
 import { presentCutoffs } from "../src/cutoffs.ts";
 import { timeScale } from "../src/time.ts";
-import { inspect, run, sleep, upstreamLog, upstreamSet } from "./helpers.ts";
+import { excerptFrom, inspect, ledger, run, sleep, upstreamLog, upstreamSet } from "./helpers.ts";
 import { checkRunTrace, type Ev } from "./trace.ts";
 
 const scale = timeScale(env);
@@ -180,6 +180,42 @@ describe("打ち切りの見せ方（Q-04）", () => {
         for (const it of items) expect(shown).toContain(it.cutoff.what);
       }),
     );
+  });
+});
+
+describe("進行中と喪失（設計 v1.5 §8.3.2、制約 Q-04）", () => {
+  it("done の束では、終わらなかった作業は gave_up として cutoffs に入る。pending は空", async () => {
+    const { id, stub } = newRun();
+    await slowPage(stub);
+    const b = await stub.start(id, { mode: "lookup", question: "遅い", urls: ["https://chain.example.com/page"] });
+    expect(b.done).toBe(true);
+    expect(b.pending).toEqual([]);
+    expect(b.cutoffs).toContainEqual(expect.objectContaining({ what: "https://chain.example.com/page", why: "gave_up" }));
+    const { events } = await inspect(stub);
+    checkRunTrace(events as Ev[], { timeScale: scale });
+  });
+
+  it("waitMs を渡すと、種類の締め切りより早く最初の束を返す", async () => {
+    const { id, stub } = newRun();
+    await slowPage(stub);
+    const t0 = Date.now();
+    const b = await stub.start(id, { mode: "survey", question: "遅い", urls: ["https://chain.example.com/page"], waitMs: 1_000 });
+    expect(Date.now() - t0).toBeLessThan(POLICY.modes.survey.startMs * scale);
+    expect(b.pending.length).toBeGreaterThan(0);
+    await stub.close();
+  });
+
+  it("台帳の候補は、照らし直しが決着するまで出さない。終わりまで決着しなければ「取得できず未照合」", async () => {
+    const l = ledger();
+    const text = "遅い出典の抜き書きの文です。";
+    await l.appendVerified(excerptFrom(text, text, { url: "https://chain.example.com/page", locator: "x" }), "volatile", "r");
+    const { id, stub } = newRun();
+    await slowPage(stub);
+    const b = await stub.start(id, { mode: "survey", question: "遅い出典の抜き書き", queries: [] });
+    expect(b.ledgerHits).toEqual([]);
+    await stub.close();
+    const n = await stub.next(0);
+    expect(n.ledgerHits.map((h) => h.status)).toEqual(["取得できず未照合"]);
   });
 });
 

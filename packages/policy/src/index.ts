@@ -137,7 +137,7 @@ export const POLICY = {
       "ai-?research\\s*(を使わず|を使わない|なしで|以外で)",
     ],
     /** ai-research で取れなかった URL を、組み込みの取得に回してよい理由。policy・robots は回さない（E-02） */
-    cutoffAllowReasons: ["blocked", "timeout", "error", "unsupported"],
+    cutoffAllowReasons: ["blocked", "timeout", "gave_up", "error", "unsupported", "no_passage"],
     /** 取れなかった URL を覚えておく時間 */
     cutoffTtlMs: 30 * 60_000,
     /** 会話ごとの明示の印を覚えておく時間（次の依頼で上書きされる） */

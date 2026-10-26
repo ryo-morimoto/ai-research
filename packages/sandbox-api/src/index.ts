@@ -32,14 +32,36 @@ export type LedgerHit = {
   passageId: string;
   sourceId: string;
   excerpt: string;
-  /** 引用確認済：照らし直して原文にあった。照合失敗：原文が変わり抜き書きがない。取得できず未照合：取り直せなかった（設計 v1.4 §8.2.6） */
-  status: "引用確認済" | "照合中" | "照合失敗" | "取得できず未照合";
+  /**
+   * 引用確認済：照らし直して原文にあった。照合失敗：原文が変わり抜き書きがない。取得できず未照合：取り直せなかった（設計 v1.4 §8.2.6）。
+   * 照らし直しが決着するまでは束に出さない（設計 v1.5 §8.3.2）
+   */
+  status: "引用確認済" | "照合失敗" | "取得できず未照合";
   reason?: string;
   /** 台帳に入れたとき（原文と照らした日時）。変わりやすい値の新しさを判断するため（Q-01） */
   verifiedAt: string;
 };
 
-export type CutoffReason = "timeout" | "blocked" | "robots" | "policy" | "budget" | "error" | "unsupported" | "not_configured";
+/**
+ * 打ち切り（確定した喪失）の理由（設計 v1.5 §8.3.2）。呼ぶ側の次の手で分ける。
+ *   timeout   取得1件の時間切れ      gave_up   調査の終わりに残っていた作業
+ *   not_found 出典がない（404 など） no_passage 取得できたが、問いに合う段落が選ばれなかった（§8.3.3）
+ */
+export type CutoffReason =
+  | "timeout"
+  | "gave_up"
+  | "blocked"
+  | "robots"
+  | "policy"
+  | "budget"
+  | "not_found"
+  | "error"
+  | "unsupported"
+  | "no_passage"
+  | "not_configured";
+
+/** まだ集めている作業（設計 v1.5 §8.3.2）。喪失ではない。next で届く */
+export type Pending = { what: string; since: string };
 
 /** urls：まとめた打ち切りの URL（経路外で読める。設計 v1.4 §8.2.4） */
 export type Cutoff = { what: string; why: CutoffReason; detail?: string; urls?: string[] };
@@ -65,6 +87,9 @@ export type Bundle = {
   sources: Record<string, SourceRef>;
   ledgerHits: LedgerHit[];
   passages: Passage[];
+  /** まだ集めている作業（done なら空） */
+  pending: Pending[];
+  /** 確定した喪失だけ */
   cutoffs: Cutoff[];
   progress: Progress;
   done: boolean;
@@ -77,6 +102,8 @@ export type Mode = "lookup" | "survey";
 export type QuestionInput = {
   question: string;
   mode: Mode;
+  /** 最初の束を、種類の締め切り（survey 25秒、lookup 15秒）より早く返す（設計 v1.5 §8.3.2） */
+  waitMs?: number;
   /** 既定は ["web"]。論文・研究の知見は "scholarly" を含める */
   sources?: SourceSet[];
   scope?: string;

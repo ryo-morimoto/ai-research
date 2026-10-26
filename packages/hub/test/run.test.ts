@@ -46,14 +46,15 @@ describe("調査の実行（RunDO）", () => {
     await trace(stub);
   });
 
-  it("INV-8：締め切りで終わっていない作業は打ち切りとして返り、続きで届く", async () => {
+  it("INV-8：締め切りで終わっていない作業は pending（喪失ではない）として返り、続きで届く（設計 v1.5 §8.3.2）", async () => {
     const { id, stub } = newRun();
     await patchEnv(stub, { TEST_DEADLINES: JSON.stringify({ fetchMs: 20_000 }) });
     await upstreamSet({ url: "https://chain.example.com/robots.txt", delayMs: 1_000, body: "" });
     await upstreamSet({ url: "https://chain.example.com/page", delayMs: 300, contentType: "text/html", body: "<article><p>遅れて届く段落の本文。</p></article>" });
     const b1 = await stub.start(id, { mode: "survey", question: "遅れて届く段落", queries: [], urls: ["https://chain.example.com/page"] });
     expect(b1.done).toBe(false);
-    expect(b1.cutoffs.some((c) => c.why === "timeout" && c.what.includes("chain.example.com"))).toBe(true);
+    expect(b1.pending.some((p) => p.what.includes("chain.example.com"))).toBe(true);
+    expect(b1.cutoffs.some((c) => c.what.includes("chain.example.com"))).toBe(false);
     expect(passageWith(b1, "遅れて届く")).toBeUndefined();
     const b2 = await stub.next(50_000);
     expect(passageWith(b2, "遅れて届く")).toBeDefined();
@@ -80,7 +81,7 @@ describe("調査の実行（RunDO）", () => {
     await upstreamSet({ url: "https://chain.example.com/robots.txt", delayMs: 1_000, body: "" });
     await upstreamSet({ url: "https://chain.example.com/page", delayMs: 300, contentType: "text/html", body: "<article><p>遅れて届く段落の本文。</p></article>" });
     const b1 = await stub.start(id, { mode: "survey", question: "制限とキャッシュ", queries: ["limits", "cache"], urls: ["https://chain.example.com/page"] });
-    expect(b1.cutoffs.some((c) => c.what.includes("chain.example.com"))).toBe(true);
+    expect(b1.pending.some((p) => p.what.includes("chain.example.com"))).toBe(true);
     // 前提：届けていない古い版の段落が残っている（予算で絞った）
     const before = await inspect(stub);
     expect(before.paras.some((p) => p.v === 1 && !p.delivered)).toBe(true);
