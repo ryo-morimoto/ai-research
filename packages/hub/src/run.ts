@@ -1,6 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   candidateParagraphs,
+  coverage,
+  queryScripts,
+  scriptOf,
   scoreParagraphs,
   clip,
   normalize,
@@ -31,17 +34,21 @@ export function compactSource(s: SourceRef): SourceRef {
   // 論文の locator（doi:…）と work.doi は URL（https://doi.org/…）と同じ情報。PMID・PMCID は束では使わない
   if (out.locator === out.url || (out.kind === "work" && out.locator?.startsWith("doi:"))) delete (out as { locator?: string }).locator;
   if (out.work) {
-    const { authors, year, venue, doi } = out.work;
+    const { authors, year, venue, doi, abstract } = out.work;
     const w: NonNullable<SourceRef["work"]> = {
       authors: authors.length > POLICY.sourceAuthorsMax ? [...authors.slice(0, POLICY.sourceAuthorsMax), "et al."] : authors,
     };
     if (year !== undefined) w.year = year;
     if (venue) w.venue = venue;
     if (doi && !out.url.endsWith(doi)) w.doi = doi;
+    if (abstract === false) w.abstract = false;
     out.work = w;
   }
   return out;
 }
+
+const QUERY_LANGUAGE_NEXT =
+  "問いと検索語に、この出典の言語の語がない（ハブは翻訳しない）。出典の言語の語で queries を渡して steer するか、find で出典の言語の語句を探す。";
 
 const POLICY_FIND_EMPTY = "その出典に、語句に当たる段落がない。別の語句で find するか、cutoffs の no_passage の URL は WebFetch で読める（経路外）。";
 import type {
@@ -175,6 +182,8 @@ export class RunDO extends DurableObject<Env> {
   private oaFollowed = 0;
   private enrichCount = 0;
   private events: RunEvent[] = [];
+  /** 言語の違いを知らせた出典（`${版}:${sourceId}`）。二度知らせない */
+  private langNotified = new Set<string>();
   /** 段落が選ばれなかったと知らせた出典（`${版}:${sourceId}`）。二度知らせない */
   private noPassageReported = new Set<string>();
   /** 版ごとに、束に入れた段落の本文（正規化後）。同じ文を二度届けない */
@@ -426,7 +435,9 @@ export class RunDO extends DurableObject<Env> {
             this.fetchedUrls.add(url);
             this.workCount++;
             p.found++;
-            if (this.enrichCount < S.enrichMax) {
+            // 補う前に、題名と抄録に関連の下限を当てる（関係のない論文の公開の版を取りに行かない。設計 v1.6 §8.4.4）
+            const relevant = coverage(`${w0.title} ${w0.abstract ?? ""}`, [m.question, ...m.queries]) >= POLICY.relevance.minCoverage;
+            if (relevant && this.enrichCount < S.enrichMax) {
               // 上位の論文だけ、抄録と公開の版を補う（API への負荷を抑える。設計 v1.5 §8.3.4）。
               // 論文ごとの作業にして、時間の上限つきで並べる（検索の作業を止めない。締め切りを守る）
               this.enrichCount++;
@@ -616,6 +627,7 @@ export class RunDO extends DurableObject<Env> {
       runId: m.runId,
       mode: m.mode,
       question: { version: v },
+      procedure: POLICY.revision,
       sources: { ...hitSources },
       ledgerHits: hitsOut,
       passages: [],
@@ -692,6 +704,9 @@ export class RunDO extends DurableObject<Env> {
         for (const it of noPassage) this.noteRouteCutoff(it.cutoff);
       }
     }
+    // 問いと出典の言語が違い、語で段落を選べない出典を知らせる（設計 v1.6 §8.4.1、S-06）
+    const langMismatch = this.languageMismatch(v, new Set(bundle.passages.map((p) => p.sourceId)));
+    if (langMismatch.length) notices.push({ kind: "query_language", sourceIds: langMismatch, next: QUERY_LANGUAGE_NEXT });
     if (!deliveredBefore && bundle.passages.length === 0 && bundle.ledgerHits.length === 0) {
       const why = this.emptyReason(bundle.progress);
       notices.push({ kind: "empty", why, next: EMPTY_NEXT[why] });
@@ -725,6 +740,22 @@ export class RunDO extends DurableObject<Env> {
       cap,
     });
     return bundle;
+  }
+
+  /** 段落が1つも届いていない出典のうち、問いと検索語にその出典の言語の語がないもの（1回だけ知らせる） */
+  private languageMismatch(v: number, inThisBundle: Set<string>): string[] {
+    const m = this.meta!;
+    const qs = queryScripts([m.question, ...m.queries]);
+    const delivered = new Set([...this.paras.values()].filter((p) => p.v === v && p.delivered).map((p) => p.sourceId));
+    const out: string[] = [];
+    for (const s of this.sources.values()) {
+      const key = `${v}:${s.sourceId}`;
+      if (s.v !== v || this.langNotified.has(key) || delivered.has(s.sourceId) || inThisBundle.has(s.sourceId)) continue;
+      if (qs.has(scriptOf(s.doc.text))) continue;
+      this.langNotified.add(key);
+      out.push(s.sourceId);
+    }
+    return out;
   }
 
   /** 取得できたが段落が1つも届いていない出典（論文の書誌は除く：出典の work に書誌がある） */
@@ -1151,6 +1182,7 @@ export class RunDO extends DurableObject<Env> {
       runId,
       mode: "survey",
       question: { version: 0 },
+      procedure: POLICY.revision,
       sources: {},
       ledgerHits: [],
       passages: [],

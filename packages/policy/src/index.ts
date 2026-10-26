@@ -11,7 +11,7 @@ export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent
 
 export const POLICY = {
   name: "ai-research",
-  revision: "2026-10-26.1",
+  revision: "2026-10-26.2",
   deadlines: {
     /** 取得1件の時間上限（P-02）。頻度制限の順番待ちは含めない */
     fetchMs: 8_000,
@@ -206,7 +206,7 @@ URL を読む：
   async () => research.start({ question: "解釈した問い", mode: "lookup", urls: ["https://…"] })
 論文・研究の知見：sources: ["scholarly", "web"] を足す。
 
-ai-research で取れなかった URL（cutoffs の blocked / timeout / gave_up / error / unsupported / no_passage。urls を含む）は、このあと WebFetch で読めます。pending は取れなかったものではありません。結果には「経路外（ai-research で取れなかった）」と書いてください。
+ai-research で取れなかった URL（cutoffs の ${POLICY.routing.cutoffAllowReasons.join(" / ")}。urls を含む）は、このあと WebFetch で読めます。pending は取れなかったものではありません。結果には「経路外（ai-research で取れなかった）」と書いてください。
 ツール検索で ai-research が見つからないときは、このあと組み込みのウェブ検索・取得を使えます。結果には「経路外（ai-research が使えない）」と書いてください。
 利用者がウェブ検索を明示したときだけ、組み込みのウェブ検索を使えます。`;
 
@@ -298,8 +298,8 @@ export function isPreferred(host: string): boolean {
 export const INSTRUCTIONS = `ai-research は利用者専用の調査の道具（出典つきの台帳つき）です。調べものには code の道具を使い、手順と API はその説明文に従ってください。`;
 
 const PROCEDURE = `
-## 使い方
-1. 依頼を、会話を見なくても意味が決まる問いに直して research.start。1つの事実・1つの URL は mode: "lookup"（urls があれば検索しない）、比較・調査は "survey"（queries を3〜5個）、論文・研究の知見は sources: ["scholarly", "web"]。
+## 使い方（手順の版 ${POLICY.revision}。束の procedure と違えば research.help() で今の手順を読む）
+1. 依頼を、会話を見なくても意味が決まる問いに直して research.start。1つの事実・1つの URL は mode: "lookup"（urls があれば検索しない）、比較・調査は "survey"（queries を3〜5個。出典の言語の語で。英語の論文なら英語）、論文・研究の知見は sources: ["scholarly", "web"]。
    別々の問いは Promise.all で並べてよい（1回の code で start は5つまで）。先に start し、next でまとめて受け取る。
 2. ledgerHits の「引用確認済」はそのまま根拠にできる（照合失敗・取得できず未照合は使わない）。passages は段落 ID と text をそのまま写した引用で verify（まとめて）。失敗は next と nearest に従う。
    切れた段落は around、cutoffs の no_passage は find。pending はまだ集めているもので、取れなかったものではない。done まで next。0件は notices の next に従う。向きが変われば steer、「徹底的に」なら deepen。

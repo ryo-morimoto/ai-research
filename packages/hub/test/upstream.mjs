@@ -167,6 +167,17 @@ DEFAULTS.set(`https://api.semanticscholar.org/graph/v1/paper/DOI:${ASCH_DOI}`, {
   body: JSON.stringify({ abstract: "Semantic Scholar abstract that should not be used when OpenAlex has one.", openAccessPdf: null }),
 });
 
+// 抄録がどの経路にもない論文（設計 v1.6 §8.4.3）
+const NOABS_DOI = "10.1037/0033-295x.103.2.263";
+DEFAULTS.set(`https://api.crossref.org/works/${NOABS_DOI}`, {
+  contentType: "application/json",
+  body: JSON.stringify({ message: { DOI: NOABS_DOI, title: ["Motivated closing of the mind: Seizing and freezing."], author: [{ given: "A. W.", family: "Kruglanski" }, { given: "D. M.", family: "Webster" }], issued: { "date-parts": [[1996]] }, "container-title": ["Psychological Review"], type: "journal-article" } }),
+});
+DEFAULTS.set("https://paper.example.org/en-only", {
+  contentType: "text/html",
+  body: html("Intuitive expertise", ["Skilled intuitions develop in environments that are sufficiently regular to be predictable, given an opportunity to learn these regularities through prolonged practice."]),
+});
+
 const SEARCH = {
   limits: ["https://docs.example.com/limits", "https://www.youtube.com/watch?v=x", "https://blocked.example.com/page"],
   cache: ["https://docs.example.com/cache"],

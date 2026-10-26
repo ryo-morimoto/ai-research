@@ -6,7 +6,8 @@
  */
 
 export type SourceKind = "web" | "github" | "arxiv" | "work";
-export type WorkMeta = { authors: string[]; year?: number; venue?: string; doi?: string; pmid?: string; pmcid?: string };
+/** abstract: false は、決めた経路のどれにも抄録がなかった印（設計 v1.6 §8.4.3） */
+export type WorkMeta = { authors: string[]; year?: number; venue?: string; doi?: string; pmid?: string; pmcid?: string; abstract?: false };
 
 /** tier は出典の種類（設計 v1.4 D13）：paper（論文）・official（公式）・encyclopedia（百科事典）・other */
 export type SourceRef = {
@@ -48,18 +49,33 @@ export type LedgerHit = {
  *   timeout   取得1件の時間切れ      gave_up   調査の終わりに残っていた作業
  *   not_found 出典がない（404 など） no_passage 取得できたが、問いに合う段落が選ばれなかった（§8.3.3）
  */
-export type CutoffReason =
-  | "timeout"
-  | "gave_up"
-  | "blocked"
-  | "robots"
-  | "policy"
-  | "budget"
-  | "not_found"
-  | "error"
-  | "unsupported"
-  | "no_passage"
-  | "not_configured";
+export const CUTOFF_REASONS = [
+  "timeout",
+  "gave_up",
+  "blocked",
+  "robots",
+  "policy",
+  "budget",
+  "not_found",
+  "error",
+  "unsupported",
+  "no_passage",
+  "not_configured",
+] as const;
+export type CutoffReason = (typeof CUTOFF_REASONS)[number];
+
+/** verify の照合失敗・未照合の理由（設計 v1.4 §8.2.6、v1.5 §8.3.7）。型と説明文の一覧はここから作る（設計 v1.6 §8.4.5） */
+export const CLAIM_REASONS = [
+  "no_citation",
+  "unknown_passage",
+  "not_in_source",
+  "marker_mismatch",
+  "near_miss",
+  "quote_too_long",
+  "empty_quote",
+  "budget",
+] as const;
+export type ClaimReason = (typeof CLAIM_REASONS)[number];
 
 /** まだ集めている作業（設計 v1.5 §8.3.2）。喪失ではない。next で届く */
 export type Pending = { what: string; since: string };
@@ -80,7 +96,8 @@ export type Notice =
   | { kind: "empty"; why: EmptyReason; next: string }
   | { kind: "passage_not_found"; passageId: string }
   | { kind: "source_not_found"; source: string }
-  | { kind: "clamped"; field: string; max: number };
+  | { kind: "clamped"; field: string; max: number }
+  | { kind: "query_language"; sourceIds: string[]; next: string };
 
 /** 束（設計 v1.4 §8.2.7）。予算は止めたときの通知（budget_stopped）だけで示す */
 export type Bundle = {
@@ -88,6 +105,8 @@ export type Bundle = {
   mode: Mode;
   /** 問いの版（steer で増える）。問いの文は呼んだ側が書いたものなので繰り返さない（設計 v1.5 §8.3.7） */
   question: { version: number };
+  /** 手順（code の道具の説明文）の版。説明文の版と違えば research.help() で今の手順を読む（設計 v1.6 §8.4.2） */
+  procedure: string;
   sources: Record<string, SourceRef>;
   ledgerHits: LedgerHit[];
   passages: Passage[];
@@ -133,7 +152,7 @@ export type ClaimInput = {
 export type ClaimStatus = {
   index: number;
   status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合";
-  reason?: "no_citation" | "unknown_passage" | "not_in_source" | "marker_mismatch" | "near_miss" | "quote_too_long" | "empty_quote" | "budget";
+  reason?: ClaimReason;
   nearest?: { text: string; score: number };
   /** 照合失敗・未照合のとき、理由ごとの次の手（設計 v1.5 §8.3.7） */
   next?: string;
@@ -158,15 +177,15 @@ export type HubError = { error: { code: HubErrorCode; retryable: boolean; messag
 /** モデルが読む型定義。道具の説明文に埋め込む */
 export const SANDBOX_TYPES = `
 type Source = { kind: "web" | "github" | "arxiv" | "work"; url: string; title?: string; locator?: string;
-  tier: "paper" | "official" | "encyclopedia" | "other"; work?: { authors: string[]; year?: number; venue?: string; doi?: string } };
+  tier: "paper" | "official" | "encyclopedia" | "other"; work?: { authors: string[]; year?: number; venue?: string; doi?: string; abstract?: false } };
 type Passage = { passageId: string; sourceId: string; text: string; context?: string };  // context は見出し（引用しない）
-type Bundle = { runId: string; question: { version: number }; sources: Record<string, Source>; passages: Passage[];
+type Bundle = { runId: string; procedure: string; question: { version: number }; sources: Record<string, Source>; passages: Passage[];
   ledgerHits: { passageId: string; sourceId: string; excerpt: string; status: string; verifiedAt: string }[];
   pending: { what: string; since: string }[];
-  cutoffs: { what: string; why: string; detail?: string; urls?: string[]; sourceId?: string }[];
+  cutoffs: { what: string; why: ${CUTOFF_REASONS.map((r) => `"${r}"`).join(" | ")}; detail?: string; urls?: string[]; sourceId?: string }[];
   progress: Record<string, number>; done: boolean; notices: { kind: string; why?: string; next?: string }[] };
 type Status = { index: number; status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合";
-  reason?: string; next?: string; nearest?: { text: string; score: number } };
+  reason?: string; next?: string; nearest?: { text: string; score: number } };   // 失敗は next に従う
 type HubError = { error: { code: string; retryable: boolean; message: string; next: string } };
 type Q = { question: string; queries?: string[]; urls?: string[]; sources?: ("web" | "scholarly")[]; waitMs?: number };
 type Extra = Promise<{ sources: Record<string, Source>; passages: Passage[]; notices: { kind: string }[] } | HubError>;
@@ -179,5 +198,6 @@ declare const research: {
   verify(runId: string, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<{ statuses: Status[] } | HubError>;
   steer(runId: string, q: Q): Promise<Bundle | HubError>;
   deepen(runId: string): Promise<Bundle | HubError>;
+  help(): Promise<{ procedure: string; description: string }>;   // 今の手順と型
 };
 `.trim();

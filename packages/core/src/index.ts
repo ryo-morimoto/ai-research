@@ -23,6 +23,8 @@ export {
   rankRelevant,
   coverage,
   discriminativeTerms,
+  scriptOf,
+  queryScripts,
   type Paragraph,
   type Selected,
   type SelectLimits,

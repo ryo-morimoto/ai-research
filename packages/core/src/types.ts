@@ -2,7 +2,8 @@
 export type SourceKind = "web" | "github" | "arxiv" | "work";
 
 /** 論文の書誌（書誌・抄録の API の値を原文どおりに） */
-export type WorkMeta = { authors: string[]; year?: number; venue?: string; doi?: string; pmid?: string; pmcid?: string };
+/** abstract: false は、決めた経路のどれにも抄録がなかった印（設計 v1.6 §8.4.3） */
+export type WorkMeta = { authors: string[]; year?: number; venue?: string; doi?: string; pmid?: string; pmcid?: string; abstract?: false };
 
 /** 出典の種類（設計 v1.4 D13）。保存せず、出典から決める（policy の tierOf） */
 export type Tier = "paper" | "official" | "encyclopedia" | "other";

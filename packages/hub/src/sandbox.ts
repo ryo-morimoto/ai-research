@@ -1,7 +1,7 @@
 import type { ResolvedProvider, Executor } from "@cloudflare/codemode";
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import type { Bundle, ClaimInput, HubError, Notice, QuestionInput } from "@ai-research/sandbox-api";
-import { POLICY, tierOf } from "@ai-research/policy";
+import { CODE_TOOL_DESCRIPTION, POLICY, tierOf } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
@@ -103,6 +103,8 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       return (await runStub(env, id).close()) ? { closed: true } : runNotFound(id);
     }, firstArg),
   };
+  // 今の手順と型（会話の途中でハブが変わったとき。設計 v1.6 §8.4.2）
+  research.help = guarded(async () => ({ procedure: POLICY.revision, description: CODE_TOOL_DESCRIPTION }));
   const ledger: Record<string, Fn> = {
     search: guarded(async (text: unknown) => {
       const stub = ledgerStub(env);

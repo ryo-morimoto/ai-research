@@ -807,7 +807,8 @@ v1.5 の確認のレビュー（追補、2026-10-26 16:30）は、指摘15件の
 #### 8.4.5 一覧を1か所に（E5）
 
 - フックが止めるときの文の「WebFetch で読める理由」の一覧は、方針の `routing.cutoffAllowReasons` から作る。
-- 束の `cutoffs.why` と verify の `reason` を、型で列挙する。型の一覧は sandbox-api の型（CutoffReason、ClaimStatus の reason）から作り、手で書き写さない。
+- 束の `cutoffs.why` と verify の `reason` を、型で列挙する。型の一覧は sandbox-api の定数（CUTOFF_REASONS、CLAIM_REASONS）から作り、手で書き写さない。
+- 説明文の上限との釣り合い：説明文に載せるのは `cutoffs.why` の列挙だけにした。verify の `reason` は、失敗ごとに `next`（次の手）が返るので、説明文では文字列のままにし、列挙は `research.help()` ではなく sandbox-api の型（実装と試験が使う）に置く。手順の版・`help()`・出典の言語の1行を足して、説明文は 1,429 トークン。上限を 1,300 から 1,450 に上げた（説明文の読み込みは会話ごとに1回で、1回の束（平均 約4,300字）より小さい）
 
 #### 8.4.6 変更の前後の計測
 

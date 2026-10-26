@@ -157,3 +157,57 @@ describe("書誌が見つからないのか、API に届かないのか（設計
     expect(!r.ok && r.cutoff.why).toBe("error");
   });
 });
+
+describe("言語の違い・手順の版・抄録のない論文・補う前の下限（設計 v1.6 §8.4）", () => {
+  it("日本語の問いで英語の出典から段落が選べないとき、query_language で知らせる。英語の語を渡せば選べる", async () => {
+    const a = newRun();
+    const b = await a.stub.start(a.id, { mode: "lookup", question: "直観的な専門性が育つ条件は何か", urls: ["https://paper.example.org/en-only"] });
+    expect(b.passages).toHaveLength(0);
+    const n = b.notices.find((x) => x.kind === "query_language") as { sourceIds: string[]; next: string } | undefined;
+    expect(n?.sourceIds.length).toBe(1);
+    expect(n?.next).toContain("出典の言語");
+    const c = newRun();
+    const b2 = await c.stub.start(c.id, { mode: "lookup", question: "直観的な専門性が育つ条件は何か", queries: ["skilled intuitions regular environment opportunity to learn"], urls: ["https://paper.example.org/en-only"] });
+    expect(b2.passages.length).toBeGreaterThan(0);
+    expect(b2.notices.some((x) => x.kind === "query_language")).toBe(false);
+  });
+
+  it("束に手順の版が載り、help() で今の説明文を読める", async () => {
+    const { POLICY } = await import("@ai-research/policy");
+    const { providers } = await import("../src/sandbox.ts");
+    const a = newRun();
+    const b = await a.stub.start(a.id, { mode: "lookup", question: "プロンプトキャッシュ", urls: ["https://docs.example.com/cache"] });
+    expect(b.procedure).toBe(POLICY.revision);
+    const [research] = providers(env);
+    const h = await (research!.fns as Record<string, () => Promise<{ procedure: string; description: string }>>).help!();
+    expect(h.procedure).toBe(POLICY.revision);
+    expect(h.description).toContain(POLICY.revision);
+    expect(h.description).toContain("research.help()");
+  });
+
+  it("どの経路にも抄録がない論文は、出典に abstract: false が付く", async () => {
+    const a = newRun();
+    const b = await a.stub.start(a.id, { mode: "lookup", question: "Kruglanski Webster seizing freezing", urls: ["https://doi.org/10.1037/0033-295X.103.2.263"] });
+    const s = Object.values(b.sources).find((x) => x.url === "https://doi.org/10.1037/0033-295x.103.2.263");
+    expect(s?.work?.abstract).toBe(false);
+    // 抄録のある論文には付かない
+    const c = newRun();
+    const b2 = await c.stub.start(c.id, { mode: "lookup", question: "Asch impressions of personality", urls: ["https://doi.org/10.1037/h0055756"] });
+    expect(Object.values(b2.sources).find((x) => x.kind === "work")?.work?.abstract).toBeUndefined();
+  });
+
+  it("関係のない論文には、抄録と公開の版を補わない", async () => {
+    const a = newRun();
+    await a.stub.start(a.id, { mode: "survey", question: "Gollwitzer の熟慮マインドセットと実行マインドセット", sources: ["scholarly"], queries: ["deliberative implemental mindset Gollwitzer"] });
+    await a.stub.next(50_000);
+    const log = await upstreamLog();
+    expect(log.some((l) => l.url.includes("openalex") && l.url.includes("0033-2909.119.2.254"))).toBe(false);
+  });
+
+  it("止めるときの文の理由の一覧は方針から作る。説明文の型に cutoffs.why の一覧がある", async () => {
+    const { POLICY, ROUTE_DENY_REASON, CODE_TOOL_DESCRIPTION } = await import("@ai-research/policy");
+    const { CUTOFF_REASONS } = await import("@ai-research/sandbox-api");
+    for (const r of POLICY.routing.cutoffAllowReasons) expect(ROUTE_DENY_REASON).toContain(r);
+    for (const r of CUTOFF_REASONS) expect(CODE_TOOL_DESCRIPTION).toContain(`"${r}"`);
+  });
+});

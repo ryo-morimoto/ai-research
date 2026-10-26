@@ -224,3 +224,25 @@ export function rankRelevant<T>(items: T[], textOf: (item: T) => string, query: 
     .slice(0, opts.limit)
     .map(({ item, score }) => ({ item, score }));
 }
+
+/**
+ * 文の主な文字（設計 v1.6 §8.4.1）。漢字・ひらがな・カタカナが文字の 30% を超えれば "cjk"、それ以外は "latin"。
+ * 先頭の 5,000 字で決める
+ */
+export function scriptOf(text: string): "cjk" | "latin" {
+  const t = text.slice(0, 5_000);
+  const cjk = (t.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu) ?? []).length;
+  const latin = (t.match(/[A-Za-z]/g) ?? []).length;
+  return cjk + latin > 0 && cjk / (cjk + latin) > 0.3 ? "cjk" : "latin";
+}
+
+/** 問いと検索語に、区別に効く語が2つ以上ある言語の組（その言語の出典なら語で選べる） */
+export function queryScripts(query: string[]): Set<"cjk" | "latin"> {
+  const out = new Set<"cjk" | "latin">();
+  for (const q of query) {
+    const t = discriminativeTerms(q);
+    if (t.filter((x) => /^[\x00-\x7f]+$/.test(x)).length >= 2) out.add("latin");
+    if (t.filter((x) => !/^[\x00-\x7f]+$/.test(x)).length >= 2) out.add("cjk");
+  }
+  return out;
+}

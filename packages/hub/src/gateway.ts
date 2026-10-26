@@ -256,7 +256,8 @@ export class Gateway {
     const P = POLICY.pdf;
     if (bytes.byteLength > P.maxBytes) return { ok: false, cutoff: { what: url, why: "unsupported", detail: `PDF が大きすぎる（${Math.round(bytes.byteLength / 1e6)}MB。上限 ${P.maxBytes / 1e6}MB）` } };
     try {
-      const r = await pdfBlocks(bytes, { maxPages: P.maxPages, timeoutMs: P.timeoutMs * timeScale(this.env) });
+      // 読み取りの時間は CPU の仕事なので、試験の時間の縮め（TEST_TIME_SCALE）を当てない
+      const r = await pdfBlocks(bytes, { maxPages: P.maxPages, timeoutMs: P.timeoutMs });
       if (r.blocks.length === 0) return { ok: false, cutoff: { what: url, why: "unsupported", detail: "PDF に文字がない（画像だけの PDF など）" } };
       if (r.truncated) r.blocks.push({ kind: "meta", text: `PDF の ${r.pages} ページのうち、最初の ${r.readPages} ページだけを読んだ`, context: "取得の注記" });
       return { ok: true, blocks: r.blocks };
@@ -352,7 +353,10 @@ export class Gateway {
     });
     try {
       const r = await Promise.race([this.enrich(w, opts), late]);
-      return r ? { work: r, partial: false } : { work: w, partial: !w.abstract };
+      if (!r) return { work: w, partial: !w.abstract };
+      // 決めた経路をすべて試して抄録がなかった印（時間切れのときは付けない。設計 v1.6 §8.4.3）
+      if (!r.abstract && r.meta.doi) return { work: { ...r, meta: { ...r.meta, abstract: false } }, partial: false };
+      return { work: r, partial: false };
     } finally {
       if (timer) clearTimeout(timer);
     }
