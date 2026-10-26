@@ -5,8 +5,8 @@ import { env } from "cloudflare:test";
 import { run, sleep } from "./helpers.ts";
 
 const U = "https://hub.test";
-async function hook(path: string, body: unknown) {
-  const r = await SELF.fetch(`${U}/hooks/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function hook(path: string, body: unknown, headers: Record<string, string> = { "X-AI-Research-Plugin": "0.4.0" }) {
+  const r = await SELF.fetch(`${U}/hooks/${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
   return { status: r.status, body: r.status === 200 ? ((await r.json()) as any) : null };
 }
 const pre = (session: string, tool: string, tool_input: Record<string, unknown> = {}) =>
@@ -45,6 +45,40 @@ describe("経路の判断（フックの受け口、U-03・Q-07）", () => {
     expect(isExplicitWebRequest("WebSearch を使わずに調べて")).toBe(false);
     expect(isExplicitWebRequest("ai-research を使わずに調べて")).toBe(true);
     expect(isExplicitWebRequest("ＷｅｂＳｅａｒｃｈで探して")).toBe(true); // 全角も NFKC でそろえる
+  });
+
+  it("否定の言い方は明示ではない（設計 v1.5 §8.3.6。「ウェブ検索ではなく」が「ウェブ検索で」に当たっていた）", () => {
+    for (const t of [
+      "ウェブ検索（web_search / web_fetch）ではなく ai-research を使う",
+      "web_search / web_fetch ではなく ai-research を使う",
+      "WebSearch ではなく ai-research で調べて",
+      "ウェブ検索ではなく、ai-research で",
+      "ウェブ検索では見つからなかったので ai-research で",
+      "WebSearch は使わないで",
+      "ウェブ検索を使わないでください",
+      "ネット検索でなく ai-research で",
+    ]) expect(isExplicitWebRequest(t), t).toBe(false);
+    for (const t of ["ウェブ検索で最新の発表を探して", "WebSearch で探して", "web_fetch で読んで", "ウェブ検索を使って調べて", "ネットで検索して"]) {
+      expect(isExplicitWebRequest(t), t).toBe(true);
+    }
+  });
+
+  it("プラグインが古い（版の見出しがない・最小の版より古い）と、その会話で1回だけ更新を知らせる。版は日ごとに数える（U-05）", async () => {
+    const old = await hook("user-prompt-submit", { session_id: "v1", prompt: "調べて" }, {});
+    expect(old.body.systemMessage).toContain("0.4.0");
+    expect(old.body.hookSpecificOutput.additionalContext).toContain("更新");
+    expect((await hook("user-prompt-submit", { session_id: "v1", prompt: "調べて" }, {})).body).toEqual({});
+    expect((await hook("user-prompt-submit", { session_id: "v2", prompt: "調べて" }, { "X-AI-Research-Plugin": "0.3.0" })).body.systemMessage).toBeDefined();
+    expect((await hook("user-prompt-submit", { session_id: "v3", prompt: "調べて" })).body).toEqual({});
+    const st = await routeStub(env).stats(1);
+    expect(st[0]!.pluginVersions).toMatchObject({ unknown: 2, "0.3.0": 1, "0.4.0": 1 });
+  });
+
+  it("明示と判定した根拠（規則の番号と語句）を残し、route_stats で見られる。依頼文の全体は残さない", async () => {
+    await prompt("s9", "長い依頼の前置き。ウェブ検索で最新の発表を探して。その後の文。");
+    const st = await routeStub(env).stats(1);
+    expect(st[0]!.explicitReasons).toEqual([{ rule: 0, match: "ウェブ検索で" }]);
+    expect(JSON.stringify(st)).not.toContain("長い依頼の前置き");
   });
 
   it("ai-research で取れなかった URL（blocked など）は WebFetch に回せる。方針で禁じた取得先は回さない（E-02）", async () => {

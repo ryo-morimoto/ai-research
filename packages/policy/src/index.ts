@@ -11,7 +11,7 @@ export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent
 
 export const POLICY = {
   name: "ai-research",
-  revision: "2026-10-25.1",
+  revision: "2026-10-26.1",
   deadlines: {
     /** 取得1件の時間上限（P-02）。頻度制限の順番待ちは含めない */
     fetchMs: 8_000,
@@ -132,14 +132,21 @@ export const POLICY = {
     fetchTools: ["WebFetch", "web_fetch"],
     /**
      * 利用者がウェブ検索を明示したとみなす言い方（正規表現、NFKC・小文字にした依頼文に当てる）。
-     * その回の依頼だけに効く。「WebSearch の代わりに」「使わず」のような否定は当てない
+     * その回の依頼だけに効く。「WebSearch の代わりに」「使わず」「ではなく」「では」のような否定は当てない（設計 v1.5 §8.3.6）。
+     * 「で」の後ろに「は・な・も」が続くもの（ではなく、でなく、では、でも）は明示にしない
      */
     explicitPatterns: [
-      "(ウェブ|web|ネット)\\s*(で\\s*)?検索(で|して|を(使|つか)(っ|い|え|う(?!な)))",
-      "web\\s*_?(search|fetch)\\s*(で|を(使|つか)(っ|い|え|う(?!な))|して)",
-      "組み込みの(検索|取得)(で|を(使|つか)(っ|い|え|う(?!な)))",
+      "(ウェブ|web|ネット)\\s*(で\\s*)?検索(で(?![はなも])|して|を(使|つか)(っ|い|え|う(?!な)))",
+      "web\\s*_?(search|fetch)\\s*(で(?![はなも])|を(使|つか)(っ|い|え|う(?!な))|して)",
+      "組み込みの(検索|取得)(で(?![はなも])|を(使|つか)(っ|い|え|う(?!な)))",
       "ai-?research\\s*(を使わず|を使わない|なしで|以外で)",
     ],
+    /** 受け付ける最小のプラグインの版。これより古い（または版の情報がない）と、会話ごとに1回だけ更新を知らせる（U-05） */
+    minPluginVersion: "0.4.0",
+    versionWarnTtlMs: 24 * 60 * 60_000,
+    /** 明示と判定した根拠（規則の番号と当たった語句）を残す数と、語句の長さの上限 */
+    explicitReasonsKeep: 200,
+    explicitMatchMaxChars: 40,
     /** ai-research で取れなかった URL を、組み込みの取得に回してよい理由。policy・robots は回さない（E-02） */
     cutoffAllowReasons: ["blocked", "timeout", "gave_up", "error", "unsupported", "no_passage"],
     /** 取れなかった URL を覚えておく時間 */

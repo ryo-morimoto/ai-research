@@ -1,7 +1,7 @@
 {
   "name": "ai-research",
   "description": "調べものを ai-research コネクタに通す。スキル ai-research-first（全面）と、組み込みの WebSearch / WebFetch を止めて案内するフック（Claude Code・Cowork）",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": { "name": "ryo-morimoto" },
   "repository": "https://github.com/ryo-morimoto/ai-research",
   "license": "MIT"

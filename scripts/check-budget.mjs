@@ -34,7 +34,29 @@ const PLACEMENT = [
   { name: "サーバーの説明文に手順を書かない", text: policy.INSTRUCTIONS, forbid: /research\.|ledger\./ },
 ];
 
+/** "0.4.0" どうしを比べる（a < b なら負） */
+function compareVersions(a, b) {
+  const x = a.split(".").map(Number);
+  const y = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0);
+  return 0;
+}
+
+// プラグインの版：plugin.json と、フックが送る版の見出し（hooks.json）がそろっている（設計 v1.5 §8.3.6、U-05）
+const pluginVersion = JSON.parse(readFileSync(join(root, "plugins/ai-research/.claude-plugin/plugin.json"), "utf8")).version;
+const hooks = JSON.parse(readFileSync(join(root, "plugins/ai-research/hooks/hooks.json"), "utf8"));
+const headerVersions = Object.values(hooks.hooks).flat().flatMap((m) => m.hooks).map((h) => h.headers?.["X-AI-Research-Plugin"]);
+const VERSION_CHECKS = [
+  { name: "フックの版の見出しが plugin.json の版と同じ", ok: headerVersions.length > 0 && headerVersions.every((v) => v === pluginVersion) },
+  { name: "ハブが受け付ける最小の版 <= plugin.json の版", ok: compareVersions(policy.POLICY.routing.minPluginVersion, pluginVersion) <= 0 },
+  { name: "PostToolUse は ToolSearch だけ（道具の結果を送らせない。E-05）", ok: (hooks.hooks.PostToolUse ?? []).every((m) => m.matcher === "ToolSearch") },
+];
+
 let failed = 0;
+for (const c of VERSION_CHECKS) {
+  if (!c.ok) failed++;
+  console.log(`${c.ok ? "ok  " : "FAIL"} ${c.name}`);
+}
 for (const b of BUDGETS) {
   const n = estimateTokens(b.text);
   const ok = n <= b.max;

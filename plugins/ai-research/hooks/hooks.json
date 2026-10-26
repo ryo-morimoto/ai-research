@@ -7,7 +7,10 @@
           {
             "type": "http",
             "url": "https://ai-research.ryo-morimoto-dev.workers.dev/hooks/user-prompt-submit",
-            "timeout": 3
+            "timeout": 3,
+            "headers": {
+              "X-AI-Research-Plugin": "0.4.0"
+            }
           }
         ]
       }
@@ -19,19 +22,25 @@
           {
             "type": "http",
             "url": "https://ai-research.ryo-morimoto-dev.workers.dev/hooks/pre-tool-use",
-            "timeout": 5
+            "timeout": 5,
+            "headers": {
+              "X-AI-Research-Plugin": "0.4.0"
+            }
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "ToolSearch|mcp__.*ai-research.*",
+        "matcher": "ToolSearch",
         "hooks": [
           {
             "type": "http",
             "url": "https://ai-research.ryo-morimoto-dev.workers.dev/hooks/post-tool-use",
-            "timeout": 3
+            "timeout": 3,
+            "headers": {
+              "X-AI-Research-Plugin": "0.4.0"
+            }
           }
         ]
       }

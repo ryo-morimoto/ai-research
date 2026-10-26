@@ -24,13 +24,26 @@ type Counts = {
   allowedSearchDown: number;
   passed: number;
   researchStarts: number;
+  explicitPrompts: number;
 };
 type DayCounts = Record<string, Counts>;
 
-const zero = (): Counts => ({ denied: 0, allowedExplicit: 0, allowedCutoff: 0, allowedNoConnector: 0, allowedSearchDown: 0, passed: 0, researchStarts: 0 });
+const zero = (): Counts => ({ denied: 0, allowedExplicit: 0, allowedCutoff: 0, allowedNoConnector: 0, allowedSearchDown: 0, passed: 0, researchStarts: 0, explicitPrompts: 0 });
 const dayOf = (ms: number) => new Date(ms + 9 * 3_600_000).toISOString().slice(0, 10); // JST の日付
 
 const EXPLICIT = POLICY.routing.explicitPatterns.map((p) => new RegExp(p, "u"));
+
+/** フックの要求に付けるプラグインの版の見出し（hooks.json の headers） */
+export const PLUGIN_HEADER = "X-AI-Research-Plugin";
+
+/** "0.4.0" と最小の版を比べる。版の情報がなければ古いとみなす */
+export function pluginOutdated(version: string | null): boolean {
+  if (!version) return true;
+  const a = version.split(".").map((x) => Number.parseInt(x, 10) || 0);
+  const b = POLICY.routing.minPluginVersion.split(".").map((x) => Number.parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
+  return false;
+}
 const CONNECTOR_TOOL = new RegExp(POLICY.routing.connectorToolPattern, "i");
 
 /** ai-research の道具か（面によって接頭辞が違う） */
@@ -44,10 +57,18 @@ export function toolSearchFoundConnector(response: unknown): boolean {
   return /mcp__[^"\s]*ai-?research[^"\s]*__/i.test(s);
 }
 
-/** 依頼文がウェブ検索を明示しているか（policy の言い方に当てる） */
-export function isExplicitWebRequest(prompt: string): boolean {
+/** 依頼文がウェブ検索を明示しているか（policy の言い方に当てる）。当たった規則の番号と語句を返す */
+export function explicitMatch(prompt: string): { rule: number; match: string } | null {
   const t = prompt.normalize("NFKC").toLowerCase();
-  return EXPLICIT.some((r) => r.test(t));
+  for (let rule = 0; rule < EXPLICIT.length; rule++) {
+    const m = t.match(EXPLICIT[rule]!);
+    if (m) return { rule, match: m[0].slice(0, POLICY.routing.explicitMatchMaxChars) };
+  }
+  return null;
+}
+
+export function isExplicitWebRequest(prompt: string): boolean {
+  return explicitMatch(prompt) !== null;
 }
 
 /** URL を比べる形（フラグメントと末尾の / を落とす） */
@@ -75,6 +96,11 @@ export class RouteDO extends DurableObject<Env> {
       this.sql.exec(`CREATE TABLE IF NOT EXISTS counts (day TEXT PRIMARY KEY, json TEXT NOT NULL)`);
       this.sql.exec(`CREATE TABLE IF NOT EXISTS no_connector (session TEXT PRIMARY KEY, expires INTEGER NOT NULL)`);
       this.sql.exec(`CREATE TABLE IF NOT EXISTS search_down (id INTEGER PRIMARY KEY CHECK (id = 1), expires INTEGER NOT NULL)`);
+      // 明示と判定した根拠（規則の番号と当たった語句だけ。依頼文の全体は残さない。設計 v1.5 §8.3.6）
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS explicit_reasons (id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL, rule INTEGER NOT NULL, match TEXT NOT NULL)`);
+      // プラグインの版（日ごと）と、更新を知らせた会話（設計 v1.5 §8.3.6、U-05）
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS plugin_versions (day TEXT NOT NULL, version TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, version))`);
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS version_warned (session TEXT PRIMARY KEY, expires INTEGER NOT NULL)`);
     });
   }
 
@@ -83,6 +109,7 @@ export class RouteDO extends DurableObject<Env> {
     this.sql.exec(`DELETE FROM cutoffs WHERE expires <= ?`, now);
     this.sql.exec(`DELETE FROM no_connector WHERE expires <= ?`, now);
     this.sql.exec(`DELETE FROM search_down WHERE expires <= ?`, now);
+    this.sql.exec(`DELETE FROM version_warned WHERE expires <= ?`, now);
     const n = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM explicit`).one().n;
     if (n > POLICY.routing.maxSessions) {
       this.sql.exec(`DELETE FROM explicit WHERE session IN (SELECT session FROM explicit ORDER BY expires ASC LIMIT ?)`, n - POLICY.routing.maxSessions);
@@ -97,10 +124,20 @@ export class RouteDO extends DurableObject<Env> {
     this.sql.exec(`INSERT INTO counts (day, json) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET json = excluded.json`, day, JSON.stringify(c));
   }
 
-  /** UserPromptSubmit：その回の依頼が明示しているかを覚える（次の依頼で上書きされる） */
-  notePrompt(session: string, explicit: boolean): void {
+  /** UserPromptSubmit：その回の依頼が明示しているかを覚える（次の依頼で上書きされる）。明示なら根拠を残す */
+  notePrompt(session: string, explicit: boolean, reason?: { rule: number; match: string }): void {
     const now = Date.now();
     this.prune(now);
+    if (explicit) {
+      this.bump("explicitPrompts", now);
+      if (reason) {
+        this.sql.exec(`INSERT INTO explicit_reasons (day, rule, match) VALUES (?, ?, ?)`, dayOf(now), reason.rule, reason.match);
+        this.sql.exec(
+          `DELETE FROM explicit_reasons WHERE id NOT IN (SELECT id FROM explicit_reasons ORDER BY id DESC LIMIT ?)`,
+          POLICY.routing.explicitReasonsKeep,
+        );
+      }
+    }
     this.sql.exec(
       `INSERT INTO explicit (session, on_flag, expires) VALUES (?, ?, ?) ON CONFLICT(session) DO UPDATE SET on_flag = excluded.on_flag, expires = excluded.expires`,
       session,
@@ -186,12 +223,50 @@ export class RouteDO extends DurableObject<Env> {
     return { kind: "deny", reason: ROUTE_DENY_REASON };
   }
 
-  /** 経路率の計数（設計 v1.2 §7.7） */
-  stats(days = 14): { day: string; counts: Counts }[] {
-    return this.sql
-      .exec<{ day: string; json: string }>(`SELECT day, json FROM counts ORDER BY day DESC LIMIT ?`, days)
-      .toArray()
-      .map((r) => ({ day: r.day, counts: { ...zero(), ...(JSON.parse(r.json) as Counts) } }));
+  /**
+   * プラグインの版を数える。受け付ける最小の版より古ければ、その会話で1回だけ true（更新を知らせる。U-05）
+   */
+  notePluginVersion(session: string, version: string | null): boolean {
+    const now = Date.now();
+    this.prune(now);
+    const v = version ?? "unknown";
+    this.sql.exec(
+      `INSERT INTO plugin_versions (day, version, n) VALUES (?, ?, 1) ON CONFLICT(day, version) DO UPDATE SET n = n + 1`,
+      dayOf(now),
+      v.slice(0, 20),
+    );
+    if (!pluginOutdated(version) || !session) return false;
+    const warned = this.sql.exec(`SELECT 1 FROM version_warned WHERE session = ? AND expires > ?`, session, now).toArray()[0];
+    if (warned) return false;
+    this.sql.exec(
+      `INSERT INTO version_warned (session, expires) VALUES (?, ?) ON CONFLICT(session) DO UPDATE SET expires = excluded.expires`,
+      session,
+      now + POLICY.routing.versionWarnTtlMs,
+    );
+    return true;
+  }
+
+  /** 経路率の計数（設計 v1.2 §7.7）。明示の根拠とプラグインの版も日ごとに */
+  stats(days = 14): { day: string; counts: Counts; explicitReasons: { rule: number; match: string }[]; pluginVersions: Record<string, number> }[] {
+    const dayRows = this.sql
+      .exec<{ day: string }>(
+        `SELECT day FROM (SELECT day FROM counts UNION SELECT day FROM plugin_versions UNION SELECT day FROM explicit_reasons) ORDER BY day DESC LIMIT ?`,
+        days,
+      )
+      .toArray();
+    return dayRows
+      .map((r) => ({ day: r.day, json: this.sql.exec<{ json: string }>(`SELECT json FROM counts WHERE day = ?`, r.day).toArray()[0]?.json ?? "{}" }))
+      .map((r) => ({
+        day: r.day,
+        counts: { ...zero(), ...(JSON.parse(r.json) as Counts) },
+        explicitReasons: this.sql
+          .exec<{ rule: number; match: string }>(`SELECT rule, match FROM explicit_reasons WHERE day = ? ORDER BY id`, r.day)
+          .toArray()
+          .map((x) => ({ rule: x.rule, match: x.match })),
+        pluginVersions: Object.fromEntries(
+          this.sql.exec<{ version: string; n: number }>(`SELECT version, n FROM plugin_versions WHERE day = ?`, r.day).toArray().map((x) => [x.version, x.n]),
+        ),
+      }));
   }
 }
 
@@ -243,11 +318,19 @@ export async function handleHook(request: Request, env: Env): Promise<Response> 
   const stub = routeStub(env);
 
   if (path === "/hooks/user-prompt-submit") {
-    if (session) await stub.notePrompt(session, isExplicitWebRequest(String(input.prompt ?? "")));
+    const reason = explicitMatch(String(input.prompt ?? ""));
+    if (session) await stub.notePrompt(session, reason !== null, reason ?? undefined);
+    // プラグインが古ければ、その会話で1回だけ利用者に知らせる（U-05、設計 v1.5 §8.3.6）
+    const version = request.headers.get(PLUGIN_HEADER);
+    if (await stub.notePluginVersion(session, version)) {
+      const msg = `ai-research プラグインが古い版です（${version ?? "版の情報なし"}）。${POLICY.routing.minPluginVersion} 以上に更新してください（Customize > Plugins）。`;
+      return json({ systemMessage: msg, hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: msg } });
+    }
     return json({});
   }
 
   if (path === "/hooks/post-tool-use") {
+    // 受け取るのはツール検索だけ（v1.5。ai-research の道具の結果は送らせない）。古い版のプラグインから届いた他の道具の入力は、読まずに捨てる
     const tool = String(input.tool_name ?? "");
     if (session && isConnectorTool(tool)) await stub.noteConnector(session, true);
     else if (session && (POLICY.routing.toolSearchTools as readonly string[]).includes(tool)) {
