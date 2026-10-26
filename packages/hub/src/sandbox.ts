@@ -1,12 +1,12 @@
 import type { ResolvedProvider, Executor } from "@cloudflare/codemode";
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import type { Bundle, ClaimInput, QuestionInput } from "@ai-research/sandbox-api";
-import { tierOf } from "@ai-research/policy";
+import { POLICY, tierOf } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
 import { routeStub } from "./route.ts";
-import { AroundOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, hubError, parse, runNotFound } from "./boundary.ts";
+import { AroundOpts, FindInput, FindOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, hubError, parse, runNotFound } from "./boundary.ts";
 
 /**
  * code mode の実行環境に渡す関数（docs/03 §2.3）。
@@ -50,6 +50,12 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       const pid = parse(PassageIdInput, passageId, "passageId");
       const o = parse(AroundOpts, opts, "opts");
       return notFound(await runStub(env, id).around(pid, o?.before ?? 1, o?.after ?? 1), id);
+    }, firstArg),
+    find: guarded(async (runId: unknown, source: unknown, text: unknown, opts?: unknown) => {
+      const id = parse(RunIdInput, runId, "runId");
+      const f = parse(FindInput, { source, text }, "find");
+      const o = parse(FindOpts, opts, "opts");
+      return notFound(await runStub(env, id).find(f.source, f.text, o?.limit ?? POLICY.find.maxResults), id);
     }, firstArg),
     verify: guarded(async (runId: unknown, claims: unknown) => {
       const id = parse(RunIdInput, runId, "runId");

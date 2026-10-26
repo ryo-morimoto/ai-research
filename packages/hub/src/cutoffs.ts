@@ -24,6 +24,8 @@ export function presentCutoffs(items: CutoffItem[]): Cutoff[] {
     };
     const urls = fromSearch.map((x) => x.what).filter((w) => /^https?:\/\//.test(w));
     if (urls.length) c.urls = urls;
+    // 理由がすべて no_passage なら、まとめても理由は no_passage（find の対象が分かるように）
+    if (fromSearch.every((x) => x.why === "no_passage")) c.detail = "取得できたが、問いに合う段落が選ばれなかった。research.find（URL で指定）で語句を探せる";
     out.push(c);
   }
   return out;

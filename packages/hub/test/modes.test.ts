@@ -219,6 +219,38 @@ describe("進行中と喪失（設計 v1.5 §8.3.2、制約 Q-04）", () => {
   });
 });
 
+describe("行き止まりをなくす（no_passage と research.find、設計 v1.5 §8.3.3、制約 P-07）", () => {
+  it("取得できたのに段落が選ばれなかった出典は、終わった束で no_passage として出る。find で探せて、照合できる。WebFetch も通る", async () => {
+    const { id, stub } = newRun();
+    const b = await stub.start(id, { mode: "lookup", question: "量子コンピュータの誤り訂正", queries: ["qubit"], urls: ["https://docs.example.com/cache"] });
+    expect(b.passages).toHaveLength(0);
+    const np = b.cutoffs.find((c) => c.why === "no_passage")!;
+    expect(np).toMatchObject({ what: "https://docs.example.com/cache", why: "no_passage" });
+    expect(np.sourceId).toMatch(/^s\d+$/);
+    const f = await stub.find(np.sourceId!, "前置きが完全に一致");
+    expect(f.passages[0]!.text).toContain("前置きが完全に一致");
+    expect(f.sources[f.passages[0]!.sourceId]?.url).toBe("https://docs.example.com/cache");
+    const v = await stub.verify([{ text: "x", cite: [{ passageId: f.passages[0]!.passageId, quote: "プロンプトキャッシュは前置きが完全に一致したときにだけ効く。" }] }]);
+    expect(v.statuses[0]!.status).toBe("引用確認済");
+    // URL でも探せる。当たらなければ理由を返す
+    expect((await stub.find("https://docs.example.com/cache", "料金")).passages.length).toBeGreaterThan(0);
+    expect((await stub.find("https://docs.example.com/cache", "zzzz")).notices[0]).toMatchObject({ kind: "empty" });
+    expect((await stub.find("s999", "x")).notices[0]).toMatchObject({ kind: "source_not_found" });
+    await sleep(50);
+    expect(await routeStub(env).decide({ session: "s", tool: "WebFetch", url: "https://docs.example.com/cache" })).toMatchObject({ kind: "allow", why: "cutoff" });
+    // 退避の後も find できる
+    await evictDurableObject(stub);
+    expect((await stub.find(np.sourceId!, "前置き")).passages.length).toBeGreaterThan(0);
+  });
+
+  it("段落が届いた出典は no_passage にしない。まだ終わっていない束でも出さない", async () => {
+    const { id, stub } = newRun();
+    const b = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュの前置き", queries: ["cache"] });
+    const last = b.done ? b : await stub.next(50_000);
+    expect([...b.cutoffs, ...last.cutoffs].some((c) => c.why === "no_passage")).toBe(false);
+  });
+});
+
 describe("段落の前後（research.around、設計 v1.4 §8.2.5）", () => {
   const page = `<html><head><title>Conditions</title></head><body><article><h1>Conditions for intuitive expertise</h1>
     <p>Kahneman and Klein argue that intuitive expertise develops only under particular conditions of the environment.</p>

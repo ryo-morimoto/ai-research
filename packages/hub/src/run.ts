@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   candidateParagraphs,
+  scoreParagraphs,
   clip,
   normalize,
   selectPassages,
@@ -21,6 +22,8 @@ import {
   type Source,
 } from "@ai-research/core";
 import { EMPTY_NEXT, POLICY, procedureVersion, tierOf } from "@ai-research/policy";
+
+const POLICY_FIND_EMPTY = "その出典に、語句に当たる段落がない。別の語句で find するか、cutoffs の no_passage の URL は WebFetch で読める（経路外）。";
 import type {
   Mode,
   AroundResult,
@@ -42,10 +45,10 @@ import type {
 import type { Env } from "./env.ts";
 import { Gateway, classifyUrl, type Doc } from "./gateway.ts";
 import { ledgerStub, type LedgerRecord } from "./ledger.ts";
-import { routeStub } from "./route.ts";
+import { routeStub, urlKey } from "./route.ts";
 import { deadlines, timeScale } from "./time.ts";
 import { timed } from "./obs.ts";
-import { presentCutoffs, type CutoffOrigin } from "./cutoffs.ts";
+import { presentCutoffs, type CutoffItem, type CutoffOrigin } from "./cutoffs.ts";
 
 /**
  * 1つの調査の実行（docs/03 §2.5.1、specs/run.qnt）。1依頼に1つ（idFromName(runId)）。
@@ -59,7 +62,8 @@ import { presentCutoffs, type CutoffOrigin } from "./cutoffs.ts";
  *   INV-13 原文の全文はストレージに書かない（メモリだけ）
  */
 
-type SourceEntry = { sourceId: string; doc: Doc; v: number };
+/** origin：その出典を何から取ったか（利用者の URL・検索・台帳）。段落が選ばれなかったときの見せ方に使う */
+type SourceEntry = { sourceId: string; doc: Doc; v: number; origin?: CutoffOrigin };
 type ParaEntry = { passageId: string; sourceId: string; text: string; context?: string; weight?: number; v: number; index: number; delivered: boolean };
 type HitEntry = {
   passageId: string;
@@ -145,6 +149,8 @@ export class RunDO extends DurableObject<Env> {
   /** この実行で足した論文の数（POLICY.scholarly.maxWorks まで） */
   private workCount = 0;
   private events: RunEvent[] = [];
+  /** 段落が選ばれなかったと知らせた出典（`${版}:${sourceId}`）。二度知らせない */
+  private noPassageReported = new Set<string>();
   /** 版ごとに、束に入れた段落の本文（正規化後）。同じ文を二度届けない */
   private shownTexts = new Map<number, Set<string>>();
 
@@ -253,10 +259,10 @@ export class RunDO extends DurableObject<Env> {
   }
 
   /** 取得した原文を登録する。古い版の作業の結果は混ぜない（INV-10） */
-  private addDoc(v: number, doc: Doc): string | null {
+  private addDoc(v: number, doc: Doc, origin?: CutoffOrigin): string | null {
     if (!this.current(v)) return null;
     const sourceId = `s${++this.counters.source}`;
-    this.sources.set(sourceId, { sourceId, doc, v });
+    this.sources.set(sourceId, origin ? { sourceId, doc, v, origin } : { sourceId, doc, v });
     this.prog().fetched++;
     for (const p of candidateParagraphs(sourceId, doc.blocks)) {
       const passageId = `p${++this.counters.passage}`;
@@ -300,7 +306,7 @@ export class RunDO extends DurableObject<Env> {
           const r = await this.gw().withSignal(signal).fetchDoc(url);
           if (!this.current(v)) return;
           if (r.ok && "doc" in r) {
-            this.addDoc(v, r.doc);
+            this.addDoc(v, r.doc, origin);
             // ページは取れず、DOI から書誌と抄録に取り直した。ページは経路外で読めるようにする（束の打ち切りには出さない）
             if (r.fallbackFrom) this.noteRouteCutoff(r.fallbackFrom);
           }
@@ -593,6 +599,14 @@ export class RunDO extends DurableObject<Env> {
       notices.push({ kind: "budget_stopped", phase });
       if (a.allowed < want) bundle = { ...base, sources: {}, passages: [], ledgerHits: [] };
     }
+    // 終わった調査で、取得できたのに段落が1つも届かなかった出典を知らせる（設計 v1.5 §8.3.3、P-07）
+    if (m.done) {
+      const noPassage = this.noPassageItems(v, new Set(bundle.passages.map((p) => p.sourceId)));
+      if (noPassage.length) {
+        bundle.cutoffs = presentCutoffs([...cutoffItems, ...noPassage]);
+        for (const it of noPassage) this.noteRouteCutoff(it.cutoff);
+      }
+    }
     if (!deliveredBefore && bundle.passages.length === 0 && bundle.ledgerHits.length === 0) {
       const why = this.emptyReason(bundle.progress);
       notices.push({ kind: "empty", why, next: EMPTY_NEXT[why] });
@@ -626,6 +640,23 @@ export class RunDO extends DurableObject<Env> {
       cap,
     });
     return bundle;
+  }
+
+  /** 取得できたが段落が1つも届いていない出典（論文の書誌は除く：出典の work に書誌がある） */
+  private noPassageItems(v: number, inThisBundle: Set<string>): CutoffItem[] {
+    const delivered = new Set([...this.paras.values()].filter((p) => p.v === v && p.delivered && this.shownTexts.get(v)?.has(normalize(p.text))).map((p) => p.sourceId));
+    const out: CutoffItem[] = [];
+    for (const s of this.sources.values()) {
+      if (s.v !== v || s.doc.source.kind === "work") continue;
+      const key = `${v}:${s.sourceId}`;
+      if (this.noPassageReported.has(key) || delivered.has(s.sourceId) || inThisBundle.has(s.sourceId)) continue;
+      this.noPassageReported.add(key);
+      out.push({
+        origin: s.origin === "url" ? "url" : "search",
+        cutoff: { what: s.doc.source.url, why: "no_passage", sourceId: s.sourceId, detail: "取得できたが、問いに合う段落が選ばれなかった。research.find で語句を探せる" },
+      });
+    }
+    return out;
   }
 
   private progressNow(v: number): Progress {
@@ -750,7 +781,7 @@ export class RunDO extends DurableObject<Env> {
     // 古い版の作業を止める。終わっても結果には混ぜない（INV-10）
     for (const t of this.tasks.values()) if (t.v === old && !t.done) t.controller.abort();
     // 取得済みの原文は、新しい版の作業として使い回す（新しい問いで選び直す）
-    for (const s of [...this.sources.values()].filter((x) => x.v === old)) this.addDoc(v, s.doc);
+    for (const s of [...this.sources.values()].filter((x) => x.v === old)) this.addDoc(v, s.doc, s.origin);
     this.log("steer", { v });
     this.launch(v, { queries, urls, question });
     return this.firstBundle(v, input.waitMs);
@@ -792,20 +823,67 @@ export class RunDO extends DurableObject<Env> {
     const k = POLICY.around.maxEach;
     const b = Math.min(k, Math.max(0, Math.floor(before)));
     const a = Math.min(k, Math.max(0, Math.floor(after)));
+    const query = [m.question, ...m.queries];
+    const picked = cands.slice(Math.max(0, pos - b), pos + a + 1);
+    return this.deliverExtra(src, picked, query, "around", { passageId });
+  }
+
+  /**
+   * 取得済みの出典の中を語句で探す（設計 v1.5 §8.3.3、P-07）。関連の下限を使わず、語の当たりの多い順に返す。
+   * source は sourceId か URL。退避で原文を失っていれば取り直す
+   */
+  async find(source: string, text: string, limit = 5): Promise<AroundResult> {
+    const m = await this.load();
+    const none = (n: Partial<AroundResult>): AroundResult => ({ sources: {}, passages: [], cutoffs: [], notices: [], ...n });
+    if (!m) return none({ notices: [{ kind: "run_not_found" }] });
+    let src = [...this.sources.values()].find((s) => s.v === m.version && (s.sourceId === source || urlKey(s.doc.source.url) === urlKey(source)));
+    if (!src) {
+      const meta = Object.values(m.passageMeta).find((x) => x.v === m.version && (x.sourceId === source || urlKey(x.url) === urlKey(source)));
+      const url = meta?.url ?? (/^https?:\/\//.test(source) ? source : null);
+      if (!url) return none({ notices: [{ kind: "source_not_found", source }] });
+      const r = await this.gw().fetchDoc(url);
+      if (!r.ok) return none({ cutoffs: [r.cutoff] });
+      if (!("doc" in r)) return none({ notices: [{ kind: "source_not_found", source }] });
+      const sourceId = meta?.sourceId ?? `s${++this.counters.source}`;
+      src = { sourceId, doc: r.doc, v: m.version };
+      this.sources.set(sourceId, src);
+    }
+    const cands = candidateParagraphs(src.sourceId, src.doc.blocks);
+    const scores = scoreParagraphs(cands, [text]);
+    const n = Math.min(POLICY.find.maxResults, Math.max(1, Math.floor(limit)));
+    const picked = cands
+      .map((c) => ({ c, s: scores.get(c) ?? 0 }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s || a.c.index - b.c.index)
+      .slice(0, n)
+      .map((x) => x.c);
+    const r = await this.deliverExtra(src, picked, [text], "find", { source: src.sourceId });
+    if (r.passages.length === 0 && r.notices.length === 0) r.notices.push({ kind: "empty", why: "not_relevant", next: POLICY_FIND_EMPTY });
+    return r;
+  }
+
+  /** around・find で選んだ塊を、照合できる段落として届ける（同じ位置の段落は同じ ID） */
+  private async deliverExtra(
+    src: SourceEntry,
+    picked: (Paragraph & { context?: string })[],
+    query: string[],
+    event: string,
+    data: Record<string, unknown>,
+  ): Promise<AroundResult> {
+    const m = this.meta!;
     const shown = this.shownTexts.get(m.version) ?? new Set<string>();
     this.shownTexts.set(m.version, shown);
-    const query = [m.question, ...m.queries];
     const passages: Passage[] = [];
     const sources: Record<string, SourceRef> = {};
-    for (const c of cands.slice(Math.max(0, pos - b), pos + a + 1)) {
-      let e = [...this.paras.values()].find((p) => p.v === m.version && p.sourceId === pm.sourceId && p.index === c.index);
+    for (const c of picked) {
+      let e = [...this.paras.values()].find((p) => p.v === m.version && p.sourceId === src.sourceId && p.index === c.index);
       if (!e) {
-        const id = Object.entries(m.passageMeta).find(([, x]) => x.v === m.version && x.sourceId === pm.sourceId && x.index === c.index)?.[0];
-        const passageId2 = id ?? `p${++this.counters.passage}`;
-        e = { passageId: passageId2, sourceId: pm.sourceId, text: c.text, v: m.version, index: c.index, delivered: false };
+        const id = Object.entries(m.passageMeta).find(([, x]) => x.v === m.version && x.sourceId === src.sourceId && x.index === c.index)?.[0];
+        const passageId = id ?? `p${++this.counters.passage}`;
+        e = { passageId, sourceId: src.sourceId, text: c.text, v: m.version, index: c.index, delivered: false };
         if (c.context) e.context = c.context;
-        this.paras.set(passageId2, e);
-        m.passageMeta[passageId2] = { sourceId: pm.sourceId, url: src.doc.source.url, locator: src.doc.source.locator, v: m.version, index: c.index };
+        this.paras.set(passageId, e);
+        m.passageMeta[passageId] = { sourceId: src.sourceId, url: src.doc.source.url, locator: src.doc.source.locator, v: m.version, index: c.index };
       }
       e.delivered = true;
       shown.add(normalize(e.text));
@@ -819,7 +897,7 @@ export class RunDO extends DurableObject<Env> {
       notices.push({ kind: "budget_stopped", phase: m.budget.phase });
       passages.length = 0;
     }
-    this.log("around", { v: m.version, passageId, n: passages.length });
+    this.log(event, { v: m.version, ...data, n: passages.length });
     await this.save();
     return { sources: passages.length ? sources : {}, passages, cutoffs: [], notices };
   }

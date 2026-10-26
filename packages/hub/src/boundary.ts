@@ -35,6 +35,8 @@ export const ClaimsInput = z
 export const RunIdInput = z.string().regex(/^run_[A-Za-z0-9-]{8,80}$/);
 export const NextOpts = z.object({ waitMs: z.number().min(0).max(60_000).optional() }).optional();
 export const PassageIdInput = z.string().regex(/^[ph]\d{1,9}$/);
+export const FindInput = z.object({ source: z.string().min(1).max(2_000), text: z.string().trim().min(1).max(300) });
+export const FindOpts = z.object({ limit: z.number().int().min(1).optional() }).optional();
 export const AroundOpts = z.object({ before: z.number().int().min(0).max(3).optional(), after: z.number().int().min(0).max(3).optional() }).optional();
 
 export class BadInput extends Error {}

@@ -96,6 +96,8 @@ export const POLICY = {
   tierWeight: { paper: 1.5, official: 1.3, encyclopedia: 1.0, other: 0.8 },
   /** 段落の前後（research.around、設計 v1.4 §8.2.5）。前後それぞれの上限と、1つの段落の文字数の上限 */
   around: { maxEach: 3, maxChars: 1_500 },
+  /** 出典の中を語句で探す（research.find、設計 v1.5 §8.3.3）。返す段落の上限 */
+  find: { maxResults: 5 },
   /** 関連の絶対の下限（問いの語の被覆率。設計 v1.4 §8.2.3）。段落と台帳で同じ値 */
   relevance: { minCoverage: 0.34 },
   search: { resultsPerQuery: 5, maxSourcesPerRun: 8 },
@@ -187,7 +189,7 @@ export const EMPTY_NEXT = {
   no_hits: "検索語を変えて research.steer を呼ぶ（論文・研究の知見なら sources: [\"scholarly\"]）。2回続けて0件なら、0件だったと利用者に伝える。",
   search_failed: "検索が使えなかった（cutoffs を参照）。組み込みのウェブ検索で調べてよい。結果には「経路外（ai-research で検索できなかった）」と書く。",
   all_failed: "見つけた出典をすべて取得できなかった。cutoffs の URL（urls を含む）は WebFetch で読んでよい。結果には「経路外（ai-research で取れなかった）」と書く。",
-  not_relevant: "取得した出典に、問いと関係のある段落がなかった。検索語を変えて research.steer を呼ぶ。",
+  not_relevant: "取得した出典に、問いと関係のある段落がなかった。cutoffs の no_passage の出典は research.find で語句を探せる。検索語を変えるなら research.steer。",
   still_running: "まだ集めている。research.next を待つ。",
 } as const;
 
