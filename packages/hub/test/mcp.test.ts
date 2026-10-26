@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { env, SELF } from "cloudflare:test";
 import { handleMcp } from "../src/mcp.ts";
 import { ledger } from "./helpers.ts";
+import { traceStub } from "../src/trace.ts";
 
 let rpcId = 0;
 async function rpc(method: string, params: Record<string, unknown> = {}, opts: { via?: "direct" | "self"; token?: string } = {}) {
@@ -37,10 +38,17 @@ describe("MCP（道具の面）", () => {
     expect(r.body!.result.instructions).toContain("code の道具");
   });
 
-  it("tools/list：code と台帳の3つ", async () => {
+  it("tools/list：モデルに見える道具は code・台帳の3つ・経路の計数と、開くツール research_view だけ（docs/05 C-01）", async () => {
     const r = await rpc("tools/list");
-    const names = (r.body!.result.tools as { name: string }[]).map((t) => t.name).sort();
-    expect(names).toEqual(["code", "ledger_export", "ledger_forget", "ledger_search", "route_stats"]);
+    type T = { name: string; description?: string; _meta?: { ui?: { visibility?: string[]; resourceUri?: string } } };
+    const tools = r.body!.result.tools as T[];
+    // 仕様：visibility に model を含まないツールは、ホストがモデルの一覧から外す
+    const modelVisible = tools.filter((t) => (t._meta?.ui?.visibility ?? ["model", "app"]).includes("model")).map((t) => t.name).sort();
+    expect(modelVisible).toEqual(["code", "ledger_export", "ledger_forget", "ledger_search", "research_view", "route_stats"]);
+    const appOnly = tools.filter((t) => !modelVisible.includes(t.name));
+    expect(appOnly.map((t) => [t.name, t._meta?.ui?.visibility])).toEqual([["trace_read", ["app"]]]);
+    const open = tools.find((t) => t.name === "research_view")!;
+    expect(open._meta?.ui?.resourceUri).toBe("ui://ai-research/view");
   });
 
   it("code mode：実行環境（Worker Loader）から research.* を呼べる（Known Unknown の確認）", async () => {
@@ -171,6 +179,45 @@ describe("OAuth", () => {
     const { access_token } = (await tok.json()) as { access_token: string };
     const r = await rpc("tools/list", {}, { via: "self", token: access_token });
     expect(r.status).toBe(200);
-    expect((r.body!.result.tools as unknown[]).length).toBe(5);
+    expect((r.body!.result.tools as unknown[]).length).toBe(7); // モデルに見える6つと app 専用の trace_read（docs/05）
+  });
+});
+
+describe("見える化（docs/05、案 C）", () => {
+  const callTool = async (name: string, args: Record<string, unknown> = {}) => (await rpc("tools/call", { name, arguments: args })).body!.result;
+
+  it("V-01・C-06：開くと、モデルに返すのは1行と件数だけ", async () => {
+    const r = await callTool("research_view");
+    expect(r.content).toEqual([{ type: "text", text: "表示しました" }]);
+    expect(Object.keys(r.structuredContent).sort()).toEqual(["running", "started"]);
+  });
+
+  it("View の中身は ui:// の resource で、MCP Apps の mimeType の1枚の HTML", async () => {
+    const list = (await rpc("resources/list")).body!.result.resources as { uri: string; mimeType: string }[];
+    expect(list).toEqual([expect.objectContaining({ uri: "ui://ai-research/view", mimeType: "text/html;profile=mcp-app" })]);
+    const read = (await rpc("resources/read", { uri: "ui://ai-research/view" })).body!.result.contents[0];
+    expect(read.mimeType).toBe("text/html;profile=mcp-app");
+    expect(read.text).toMatch(/^<!doctype html>/);
+    expect(read.text).toContain('"readTool":"trace_read"');
+  });
+
+  it("trace_read：今日と、1回の調査の流れを structuredContent で返す", async () => {
+    const id = "run_view_1";
+    const t = Date.now();
+    const tr = traceStub(env);
+    await tr.append(
+      JSON.stringify([
+        { type: "run.started", runId: id, at: t, ev: 1, v: 1, question: "見える化の問い", mode: "survey", queries: ["q"] },
+        { type: "search.sent", runId: id, at: t + 1, ev: 2, v: 1, query: "q", provider: "web", ok: true, hits: 2 },
+      ]),
+    );
+    const today = (await callTool("trace_read", { view: "today" })).structuredContent;
+    expect(today.started).toBe(1);
+    expect(today.running.map((x: { runId: string }) => x.runId)).toEqual([id]);
+    const flow = (await callTool("trace_read", { view: "run", id })).structuredContent;
+    expect(flow.summary).toMatchObject({ runId: id, question: "見える化の問い", done: false });
+    expect(flow.events.map((e: { type: string }) => e.type)).toEqual(["run.started", "search.sent"]);
+    const missing = await callTool("trace_read", { view: "run" });
+    expect(missing.isError).toBe(true);
   });
 });

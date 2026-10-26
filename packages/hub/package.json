@@ -14,6 +14,7 @@
     "@ai-research/core": "workspace:*",
     "@ai-research/policy": "workspace:*",
     "@ai-research/sandbox-api": "workspace:*",
+    "@ai-research/view": "workspace:*",
     "@cloudflare/codemode": "0.5.5",
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@modelcontextprotocol/sdk": "1.32.1",

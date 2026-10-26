@@ -30,6 +30,21 @@ export const POLICY = {
    * retentionDays を過ぎた事象は消す（C-10）。flushBatch は RunDO から1回に送る事象の数
    */
   trace: { ...TRACE_LIMITS, retentionDays: 90, pruneEveryMs: 3_600_000, flushBatch: 200, maxEventsPerRun: 5_000 },
+  /**
+   * 会話の中の View（docs/05 §3、案 C）。モデルに見せるのは openTool だけ（C-01）。
+   * app 専用ツールは、MCP Apps の宣言に関係なくいつも一覧に出す。ハブは要求ごとにサーバーを作る（状態を持たない）ので、
+   * tools/list の時点で相手の宣言を知らない（docs/05 §6）。モデルの一覧から外すのはホストの役目（仕様）
+   * pollMs：実行中の調査がある間だけ View が読み直す間隔（V-05）。runningWindowMs：終わりの記録がなくても実行中とみなす長さ
+   */
+  view: {
+    openTool: "research_view",
+    readTool: "trace_read",
+    resourceUri: "ui://ai-research/view",
+    mimeType: "text/html;profile=mcp-app",
+    pollMs: 15_000,
+    runningWindowMs: 600_000,
+    recentRuns: 20,
+  },
   caps: { ...DEFAULT_CAPS },
   tokenFactors: { ...DEFAULT_TOKEN_FACTORS },
   /** 取得先ごとの制限【暫定】。pattern はホスト名の末尾一致 */
@@ -214,6 +229,13 @@ URL を読む：
 ai-research で取れなかった URL（cutoffs の ${POLICY.routing.cutoffAllowReasons.join(" / ")}。urls を含む）は、このあと WebFetch で読めます。pending は取れなかったものではありません。結果には「経路外（ai-research で取れなかった）」と書いてください。
 ツール検索で ai-research が見つからないときは、このあと組み込みのウェブ検索・取得を使えます。結果には「経路外（ai-research が使えない）」と書いてください。
 利用者がウェブ検索を明示したときだけ、組み込みのウェブ検索を使えます。`;
+
+/**
+ * 開くツールの説明文と、開いたときにモデルへ返す1行（docs/05、V-01）。モデルが見るのはこの2つだけ。
+ * 大きさは scripts/check-budget.mjs で固定する。利用者が頼んだときだけ呼ぶように書く（勝手に開くと消費が増える）
+ */
+export const VIEW_TOOL_DESCRIPTION = "調査の記録を画面で開く。利用者が見たいと言ったときだけ呼ぶ";
+export const VIEW_OPEN_TEXT = "表示しました";
 
 /** 通すときにモデルへ添える文（Q-07） */
 export const ROUTE_ALLOW_CONTEXT = {

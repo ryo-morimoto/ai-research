@@ -1,4 +1,4 @@
-# 調査の記録と見える化（v0.1）
+# 調査の記録と見える化（v0.2）
 
 ai-research が「どの概念を、どの語で、どの出典に当たって、何を確かめ、何を取りこぼしたか」を、本人が会話の中の画面で追えるようにする。トークンを使うのは開く1回だけにする。
 
@@ -91,6 +91,25 @@ RPC：`append(json)`、`runs({limit, since})`、`events(runId)`、`exportJsonl({
 
 `trace(type, data)` で事象を積み、`ctx.waitUntil` の中でまとめて `append` する。調査の応答は待たない。送れなかった数は `trace_dropped` として観測（observability）に1行残す。
 
+### 3.4 開く・読む・画面（T1）
+
+| 部品 | 置き場所 | 中身 |
+| --- | --- | --- |
+| `research_view` | hub/src/mcp.ts | モデルに見える唯一の追加。引数なし。説明文は「調査の記録を画面で開く。利用者が見たいと言ったときだけ呼ぶ」。`_meta.ui.resourceUri` で View を指す。返すのは `content` の「表示しました」と、`structuredContent` の件数（started・running）だけ |
+| `trace_read` | hub/src/mcp.ts | app 専用（`_meta.ui.visibility: ["app"]`、`readOnlyHint`）。引数 `{view: "today" \| "runs" \| "run", id?, limit?}`。結果は `structuredContent` |
+| `ui://ai-research/view` | hub/src/mcp.ts（resource） | mimeType `text/html;profile=mcp-app`。中身は packages/view の `viewHtml()` |
+| View | packages/view/src/index.ts | 1枚の HTML。外部を読まない。MCP Apps の View の側の通信を手で書いた（公式の App クラスは依存込みで約 400KB あるため使わない） |
+| TraceDO の読み取り | hub/src/trace.ts | `today()`（JST の今日に始まった数、実行中、最近 20 件）と `run(id)`（集計と事象） |
+
+View の動き：
+
+1. `ui/initialize`（protocolVersion `2026-01-26`、appInfo）を送り、応答の hostContext（theme、styles.variables、timeZone）を当てる。`ui/notifications/initialized` を送ってから `trace_read {view: "today"}` を呼ぶ
+2. 「今日」：今日始まった数、実行中、最近の調査。押すと `trace_read {view: "run", id}` で「調査の流れ」へ
+3. 「調査の流れ」：問いの版ごとに見出しを置き、事象を時刻順に並べる（検索・取得・段落・台帳・照合・打ち切り・終わり）。検索の失敗、照合失敗、打ち切りに色
+4. 実行中の調査があるときだけ `pollMs`（15 秒）ごとに読み直す
+5. 高さが変わるたびに `ui/notifications/size-changed` を送る
+6. JSON-RPC でないメッセージと、親以外からのメッセージは捨てる。`ping` には答える
+
 ## 4. 制約の守り方と試験
 
 | 守るもの | 試験 |
@@ -101,19 +120,46 @@ RPC：`append(json)`、`runs({limit, since})`、`events(runId)`、`exportJsonl({
 | C-04 全文を残さない | `core/test/trace.test.ts` の性質 T1〜T3（許した欄だけ・上限を超えない・冪等）と、`tracedo.test.ts` の書き出しに段落の本文がないことの確認 |
 | C-08 墓標 | `tracedo.test.ts`：取り消すと読み取りに出ない。遅れて届いた事象も捨てる |
 | C-10 保持期間 | `tracedo.test.ts`：91 日前の事象と集計が消える |
+| V-01 開く消費 | `check-budget`：開くツールの名前＋説明文＋返す1行が推定 50 トークン以下（今は 40）。`mcp.test.ts`：開く結果は1行と件数だけ |
+| C-01 モデルに見える一覧 | `mcp.test.ts`：visibility に model を含むツールは既存の5つと `research_view` だけ。app 専用は `trace_read` だけ |
+| C-09・C-11 View | `view/test/view.test.ts`：取得した文字列が要素にならない。View の処理に `ui/update-model-context`・`ui/message`・`innerHTML`・`eval`・`fetch` などがない。外部の読み込みがない |
+| View の通信 | `view/test/view.test.ts`：ホストの代わりに handshake、今日 → 調査の流れ、実行中の読み直し、失敗ともう一度、JSON-RPC でないものを捨てる、を確かめる。ほかに headless Chromium でホストを模して画面を撮り、幅 700px・375px、明暗の両方で崩れないことを目で見た（T1、10/26） |
+| V-02 規則 5 | `scripts/check-deps.mjs`：View は何にも依存しない |
 
 ## 5. 進め方
 
 - [x] T0：事象の型、TraceDO、RunDO からの送り出し（v0.1、2026-10-26）。画面はまだない。中身は試験と、Cloudflare の Data Studio（SQLite の Durable Object の中を見られる）で確かめる。モデルに見える道具は足していない（C-01）
-- [ ] T1：描画の試作（カスタムコネクタで View が描かれるか、View から app 専用ツールを呼べるか、承認が毎回出ないか、モバイル、会話を開き直したとき）、`research_view`、View、`trace_read`、今日と調査の流れの画面
+- [x] T1（コード）：`research_view`、`trace_read`、`ui://ai-research/view`、View（今日と調査の流れ）。試験と模擬のホストでの描画まで（v0.2、2026-10-26）
+- [ ] T1（実機）：デプロイして、下の §8 の確認をする
 - [ ] T2：1回の調査の概念とずれの印（目的 1）、取りこぼしの偏りの画面（目的 2）
 - [ ] T3（必要なら）：調査をまたぐ概念の地図。会話の外で見るための案 B（Artifact）か案 A（ブラウザ）
 
-## 6. 分かったこと（T0）
+## 6. 分かったこと
 
 - RunDO は実行後も `meta`（問い・検索語・版・進み具合・段落のメタデータ）と、最大 500 件の内部の記録（`events`）を自分のストレージに残している。ただし調査ごとに別の Durable Object なので一覧できず、打ち切りの理由・ホスト・題を持たない。だから TraceDO を別に置いた
 - ハブには LLM を呼ぶ部品がない。見る道が LLM に依存しないことは、今の構造でも満たされている（規則 4 はそれを固定する）
 
+- ハブは要求ごとに MCP サーバーを作る（状態を持たない）。だから tools/list の時点で、相手が MCP Apps を宣言したかを知らない。app 専用ツールはいつも一覧に出し、モデルの一覧から外すのはホストに任せる（仕様ではホストの義務）。設計で考えていた「宣言した接続にだけ返す」設定は作らなかった（T1）
+
 ## 7. デプロイ
 
 TraceDO は新しい Durable Object のクラス。`wrangler.jsonc` に移行 `v3`（`new_sqlite_classes: ["TraceDO"]`）と束縛 `TRACE` を、`cloudflare.config.ts` に `TraceDO` の export と束縛を足した。手順は docs/04 と同じ。
+
+T1 では新しい束縛はない。packages/view はワークスペースのパッケージで、hub が TS のまま取り込む（core と同じ）。
+
+## 8. 実機での確認（T1、利用者が行う）
+
+デプロイのあと、次を確かめる。結果で未決事項 3・6・8 が決まる。
+
+| # | 面 | すること | 見ること |
+| --- | --- | --- | --- |
+| 1 | claude.ai web の Chat | 「調査の記録を見せて」と頼む | View が描かれるか（未決事項 3）。ツールの承認を求められたら、`research_view` の1回だけか |
+| 2 | 同じ | View の中で調査を押す。戻る | 会話に新しいモデルの応答が出ないこと（V-01）。`trace_read` のたびに承認が出ないか（未決事項 3） |
+| 3 | 同じ | 調査を1つ走らせながら View を開いておく | 実行中の調査が 15 秒ほどで更新されるか（V-05） |
+| 4 | Desktop の Chat、Desktop の Code | 1・2 と同じ | 描かれるか（claude-ai-mcp#165 の影響） |
+| 5 | モバイルアプリ | 1・2 と同じ | 描かれるか、幅で崩れないか（未決事項 6、V-07） |
+| 6 | 1 の会話 | 会話を開き直す | View がまた描かれ、押して読めるか（未決事項 8）。読めれば「見る用の会話」を1つ決めて使い回す |
+| 7 | Chat | 「ai-research の道具の名前を全部挙げて」と頼む（確認のための1回） | `trace_read` が挙がらないこと（C-01） |
+
+描かれなかった面があれば、そのときのブラウザの開発者ツールのコンソールと、ハブの観測（observability）の `resources/read` の有無を残す。どの面でも描かれなければ、ext-apps#671 の件が方針か不具合かを確かめ、方針なら案 B（Artifact）に切り替える（`trace_read` はそのまま使える）。
+

@@ -26,6 +26,12 @@ const BUDGETS = [
   { name: "スキルの説明文", text: description, max: 120 },
   { name: "スキルの本文", text: body ?? "", max: 150 },
   { name: "フックが止めるときの文（ROUTE_DENY_REASON）", text: policy.ROUTE_DENY_REASON, max: 450 },
+  // 見える化（docs/05、V-01）：開くときにモデルが見るのは、開くツールの名前と説明文と、返す1行だけ。合わせて 50 以下
+  {
+    name: "開くツールの名前＋説明文＋返す1行（V-01）",
+    text: `${policy.POLICY.view.openTool} ${policy.VIEW_TOOL_DESCRIPTION} ${policy.VIEW_OPEN_TEXT}`,
+    max: 50,
+  },
 ];
 
 // 置き場所：手順は code の道具の説明文だけに書く

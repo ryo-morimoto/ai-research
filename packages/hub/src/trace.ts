@@ -239,6 +239,31 @@ export class TraceDO extends DurableObject<Env> {
     return rows.map(toSummary);
   }
 
+  /**
+   * 今日（JST）の調査（View の「今日」。docs/05 §3）。started は今日始まった数、running は終わりの記録がなく
+   * runningWindowMs 以内に事象が届いているもの、recent は新しい順に recentRuns 件
+   */
+  today(now = Date.now()): { date: string; started: number; running: RunSummary[]; recent: RunSummary[] } {
+    const JST = 9 * 3_600_000;
+    const dayStart = Math.floor((now + JST) / 86_400_000) * 86_400_000 - JST;
+    const date = new Date(dayStart + JST).toISOString().slice(0, 10);
+    const alive = `run_id NOT IN (SELECT run_id FROM tombstones)`;
+    const started = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM runs WHERE started_at >= ? AND ${alive}`, dayStart).one().n;
+    const running = this.sql
+      .exec<RunRow>(`SELECT * FROM runs WHERE done = 0 AND last_at >= ? AND ${alive} ORDER BY started_at DESC LIMIT 50`, now - POLICY.view.runningWindowMs)
+      .toArray()
+      .map(toSummary);
+    const recent = this.sql.exec<RunRow>(`SELECT * FROM runs WHERE ${alive} ORDER BY started_at DESC LIMIT ?`, POLICY.view.recentRuns).toArray().map(toSummary);
+    return { date, started, running, recent };
+  }
+
+  /** 1つの調査の集計と事象（View の「調査の流れ」）。墓標が付いていれば null と空 */
+  run(runId: string): { summary: RunSummary | null; events: TraceEvent[] } {
+    if (this.forgotten(runId)) return { summary: null, events: [] };
+    const row = this.sql.exec<RunRow>(`SELECT * FROM runs WHERE run_id = ?`, runId).toArray()[0];
+    return { summary: row ? toSummary(row) : null, events: this.events(runId) };
+  }
+
   /** 1つの調査の事象（届いた順ではなく、調査の中の順）。墓標が付いていれば空 */
   events(runId: string): TraceEvent[] {
     if (this.forgotten(runId)) return [];

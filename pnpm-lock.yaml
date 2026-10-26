@@ -38,6 +38,9 @@ importers:
       '@ai-research/sandbox-api':
         specifier: workspace:*
         version: link:../sandbox-api
+      '@ai-research/view':
+        specifier: workspace:*
+        version: link:../view
       '@cloudflare/codemode':
         specifier: 0.5.5
         version: 0.5.5(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.7))(zod@4.6.7)
@@ -103,6 +106,21 @@ importers:
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+
+  packages/view:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      linkedom:
+        specifier: 0.18.14
+        version: 0.18.14
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.12
+        version: 4.1.12(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(yaml@2.9.1))
 
   specs:
     devDependencies:

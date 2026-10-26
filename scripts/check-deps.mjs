@@ -8,6 +8,7 @@
  * 3. 台帳への追記（appendVerified）を呼べるのは hub の ledger モジュールと run モジュールだけ
  * 4. 調査の記録（docs/05）は、見るための道。取得の出口・code の実行・外への通信に依存しない（V-01）。
  *    hub/src/trace*.ts と core/src/trace.ts が使ってよいのは、下の TRACE_ALLOWED だけ。fetch も呼ばない
+ * 5. View（packages/view/src）は何にも依存しない。値は hub が渡す（docs/05 §3）
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -61,6 +62,12 @@ for (const f of files) {
     if (!TRACE_ALLOWED.has(m[1])) errors.push(`${rel}: 記録の道は ${m[1]} に依存できない（V-01）`);
   }
   if (/\bfetch\s*\(/.test(src)) errors.push(`${rel}: 記録の道は fetch を呼ばない（V-01）`);
+}
+for (const f of files) {
+  const rel = relative(root, f);
+  if (!rel.startsWith("packages/view/src/")) continue;
+  const src = readFileSync(f, "utf8");
+  for (const m of src.matchAll(/^\s*import\s.*from\s+["']([^"']+)["']/gm)) errors.push(`${rel}: View は ${m[1]} に依存できない（規則 5）`);
 }
 
 if (errors.length) {
