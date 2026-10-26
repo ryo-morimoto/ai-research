@@ -11,7 +11,8 @@ import { providers, makeExecutor } from "./sandbox.ts";
 const MAX_RESULT_CHARS = 60_000;
 
 function text(value: unknown): { content: { type: "text"; text: string }[] } {
-  let s = typeof value === "string" ? value : JSON.stringify(value, null, 1);
+  // 字下げしない（字下げと改行だけで結果が重くなる。設計 v1.5 §8.3.7）
+  let s = typeof value === "string" ? value : JSON.stringify(value);
   if (s.length > MAX_RESULT_CHARS) s = `${s.slice(0, MAX_RESULT_CHARS)}\n…（${s.length - MAX_RESULT_CHARS} 文字を省略）`;
   return { content: [{ type: "text", text: s }] };
 }

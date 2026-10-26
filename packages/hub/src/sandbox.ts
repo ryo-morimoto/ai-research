@@ -1,6 +1,6 @@
 import type { ResolvedProvider, Executor } from "@cloudflare/codemode";
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
-import type { Bundle, ClaimInput, QuestionInput } from "@ai-research/sandbox-api";
+import type { Bundle, ClaimInput, Notice, QuestionInput } from "@ai-research/sandbox-api";
 import { POLICY, tierOf } from "@ai-research/policy";
 import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
@@ -49,7 +49,15 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       const id = parse(RunIdInput, runId, "runId");
       const pid = parse(PassageIdInput, passageId, "passageId");
       const o = parse(AroundOpts, opts, "opts");
-      return notFound(await runStub(env, id).around(pid, o?.before ?? 1, o?.after ?? 1), id);
+      const max = POLICY.around.maxEach;
+      const clamped: Notice[] = [];
+      const clamp = (field: "before" | "after", v: number | undefined) => {
+        if (v !== undefined && v > max) clamped.push({ kind: "clamped", field, max });
+        return Math.min(max, v ?? 1);
+      };
+      const r = await runStub(env, id).around(pid, clamp("before", o?.before), clamp("after", o?.after));
+      if (clamped.length) r.notices = [...clamped, ...r.notices];
+      return notFound(r, id);
     }, firstArg),
     find: guarded(async (runId: unknown, source: unknown, text: unknown, opts?: unknown) => {
       const id = parse(RunIdInput, runId, "runId");

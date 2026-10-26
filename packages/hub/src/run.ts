@@ -21,7 +21,19 @@ import {
   type Phase,
   type Source,
 } from "@ai-research/core";
-import { EMPTY_NEXT, POLICY, procedureVersion, tierOf } from "@ai-research/policy";
+import { EMPTY_NEXT, POLICY, VERIFY_NEXT, procedureVersion, tierOf } from "@ai-research/policy";
+
+/**
+ * 束に出す出典を軽くする（設計 v1.5 §8.3.7）：URL と同じ locator は省く。著者は POLICY.sourceAuthorsMax 人まで
+ */
+export function compactSource(s: SourceRef): SourceRef {
+  const out: SourceRef = { ...s };
+  if (out.locator === out.url) delete (out as { locator?: string }).locator;
+  if (out.work && out.work.authors.length > POLICY.sourceAuthorsMax) {
+    out.work = { ...out.work, authors: [...out.work.authors.slice(0, POLICY.sourceAuthorsMax), "et al."] };
+  }
+  return out;
+}
 
 const POLICY_FIND_EMPTY = "その出典に、語句に当たる段落がない。別の語句で find するか、cutoffs の no_passage の URL は WebFetch で読める（経路外）。";
 import type {
@@ -116,6 +128,8 @@ type Meta = {
   queries: string[];
   urls: string[];
   mode: Mode;
+  /** 1つの束で返す段落の上限（呼んだ側が小さくしたとき。設計 v1.5 §8.3.7） */
+  maxPassages?: number;
   /** 探す先（設計 v1.4 §8.2.2）。古い記録にはないので既定は ["web"] */
   sources?: SourceSet[];
   deep: boolean;
@@ -477,7 +491,7 @@ export class RunDO extends DurableObject<Env> {
   private sourceRef(sourceId: string, passageId: string): SourceRef {
     const s = this.sources.get(sourceId);
     const src: Source = s?.doc.source ?? { kind: "web", url: this.meta!.passageMeta[passageId]?.url ?? "", locator: "" };
-    return { ...src, tier: tierOf(src) } as SourceRef;
+    return compactSource({ ...src, tier: tierOf(src) } as SourceRef);
   }
 
   /** 段落と、その出典（束の sources に1回だけ置く。設計 v1.4 §8.2.7） */
@@ -504,13 +518,13 @@ export class RunDO extends DurableObject<Env> {
         // 同じ URL の候補は、出典を1つにまとめる
         const sid = hitSourceByUrl.get(h.record.url) ?? h.passageId;
         hitSourceByUrl.set(h.record.url, sid);
-        hitSources[sid] ??= {
+        hitSources[sid] ??= compactSource({
           kind: h.record.kind,
           url: h.record.url,
           locator: h.record.locator,
           tier: tierOf(h.record),
           ...(h.record.title ? { title: h.record.title } : {}),
-        };
+        });
         const out: LedgerHit = {
           passageId: h.passageId,
           sourceId: sid,
@@ -537,7 +551,7 @@ export class RunDO extends DurableObject<Env> {
     const base: Bundle = {
       runId: m.runId,
       mode: m.mode,
-      question: { version: v, text: m.question },
+      question: { version: v },
       sources: { ...hitSources },
       ledgerHits: hitsOut,
       passages: [],
@@ -571,7 +585,7 @@ export class RunDO extends DurableObject<Env> {
     }
     const selected = selectPassages(candidates, [m.question, ...m.queries], {
       passageMaxChars: POLICY.limits.passageMaxChars,
-      passagesPerBundle: POLICY.modes[m.mode].passagesPerBundle,
+      passagesPerBundle: Math.min(POLICY.modes[m.mode].passagesPerBundle, m.maxPassages ?? Infinity),
       passagesPerSource: POLICY.modes[m.mode].passagesPerSource,
       maxTokens: Math.min(POLICY.limits.bundleMaxTokens, remaining),
       minRatio: POLICY.passages.minRatio,
@@ -719,6 +733,7 @@ export class RunDO extends DurableObject<Env> {
       manifest: await this.manifestFor(runId, { ...input, question, queries }, client),
       passageMeta: {},
     };
+    if (input.maxPassages) meta.maxPassages = Math.max(1, Math.floor(input.maxPassages));
     if (input.scope) meta.scope = input.scope;
     if (input.exclusions) meta.exclusions = input.exclusions;
     this.meta = meta;
@@ -914,7 +929,7 @@ export class RunDO extends DurableObject<Env> {
     if (a.allowed < want) {
       notices.push({ kind: "budget_stopped", phase: m.budget.phase });
       await this.save();
-      return { statuses: list.map((_, index) => ({ index, status: "未照合", reason: "budget" })), notices };
+      return { statuses: list.map((_, index) => ({ index, status: "未照合", reason: "budget", next: VERIFY_NEXT.budget })), notices };
     }
     const ledger = ledgerStub(this.env);
     const statuses: ClaimStatus[] = [];
@@ -922,7 +937,7 @@ export class RunDO extends DurableObject<Env> {
       const claim = list[index]!;
       const cites = Array.isArray(claim.cite) ? claim.cite : [];
       if (cites.length === 0) {
-        statuses.push({ index, status: "未照合", reason: "no_citation" });
+        statuses.push({ index, status: "未照合", reason: "no_citation", next: VERIFY_NEXT.no_citation });
         continue;
       }
       let allExact = true;
@@ -952,7 +967,15 @@ export class RunDO extends DurableObject<Env> {
         const rec = await ledger.appendVerified(r.excerpt, vol, m.runId);
         recorded.push(rec.recordId);
       }
-      if (failure) statuses.push({ index, status: "照合失敗", reason: failure, ...(nearest ? { nearest } : {}), ...(recorded.length ? { recorded } : {}) });
+      if (failure)
+        statuses.push({
+          index,
+          status: "照合失敗",
+          reason: failure,
+          next: VERIFY_NEXT[failure],
+          ...(nearest ? { nearest } : {}),
+          ...(recorded.length ? { recorded } : {}),
+        });
       else statuses.push({ index, status: allExact ? "引用確認済" : "引用確認済（表記差あり）", recorded });
     }
     this.log("verify", { v: m.version, n: list.length, ok: statuses.filter((s) => s.status.startsWith("引用確認済")).length });
@@ -1036,7 +1059,7 @@ export class RunDO extends DurableObject<Env> {
     return {
       runId,
       mode: "survey",
-      question: { version: 0, text: "" },
+      question: { version: 0 },
       sources: {},
       ledgerHits: [],
       passages: [],

@@ -13,7 +13,8 @@ export type SourceRef = {
   kind: SourceKind;
   url: string;
   title?: string;
-  locator: string;
+  /** 位置（URL と同じなら省く） */
+  locator?: string;
   tier?: "paper" | "official" | "encyclopedia" | "other";
   /** 論文の書誌（kind が work のとき。設計 v1.4 §8.2.2） */
   work?: WorkMeta;
@@ -78,13 +79,15 @@ export type Notice =
   | { kind: "run_not_found" }
   | { kind: "empty"; why: EmptyReason; next: string }
   | { kind: "passage_not_found"; passageId: string }
-  | { kind: "source_not_found"; source: string };
+  | { kind: "source_not_found"; source: string }
+  | { kind: "clamped"; field: string; max: number };
 
 /** 束（設計 v1.4 §8.2.7）。予算は止めたときの通知（budget_stopped）だけで示す */
 export type Bundle = {
   runId: string;
   mode: Mode;
-  question: { version: number; text: string };
+  /** 問いの版（steer で増える）。問いの文は呼んだ側が書いたものなので繰り返さない（設計 v1.5 §8.3.7） */
+  question: { version: number };
   sources: Record<string, SourceRef>;
   ledgerHits: LedgerHit[];
   passages: Passage[];
@@ -105,6 +108,8 @@ export type QuestionInput = {
   mode: Mode;
   /** 最初の束を、種類の締め切り（survey 25秒、lookup 15秒）より早く返す（設計 v1.5 §8.3.2） */
   waitMs?: number;
+  /** 1つの束で返す段落の上限（種類の上限より小さくだけできる。設計 v1.5 §8.3.7） */
+  maxPassages?: number;
   /** 既定は ["web"]。論文・研究の知見は "scholarly" を含める */
   sources?: SourceSet[];
   scope?: string;
@@ -130,6 +135,8 @@ export type ClaimStatus = {
   status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合";
   reason?: "no_citation" | "unknown_passage" | "not_in_source" | "marker_mismatch" | "near_miss" | "quote_too_long" | "empty_quote" | "stale_version" | "budget";
   nearest?: { text: string; score: number };
+  /** 照合失敗・未照合のとき、理由ごとの次の手（設計 v1.5 §8.3.7） */
+  next?: string;
   recorded?: string[];
 };
 

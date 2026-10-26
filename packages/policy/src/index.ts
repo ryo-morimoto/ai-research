@@ -96,6 +96,8 @@ export const POLICY = {
   tierWeight: { paper: 1.5, official: 1.3, encyclopedia: 1.0, other: 0.8 },
   /** 段落の前後（research.around、設計 v1.4 §8.2.5）。前後それぞれの上限と、1つの段落の文字数の上限 */
   around: { maxEach: 3, maxChars: 1_500 },
+  /** 束の出典の著者は、この人数まで（ほかは「et al.」。設計 v1.5 §8.3.7） */
+  sourceAuthorsMax: 3,
   /** 出典の中を語句で探す（research.find、設計 v1.5 §8.3.3）。返す段落の上限 */
   find: { maxResults: 5 },
   /** 関連の絶対の下限（問いの語の被覆率。設計 v1.4 §8.2.3）。段落と台帳で同じ値 */
@@ -180,6 +182,19 @@ export const ROUTE_ALLOW_CONTEXT = {
   cutoff: "ai-research で取れなかった URL なので、組み込みの取得で読みます。結果には「経路外（ai-research で取れなかった）」と書き、確認済の印は付けないでください。",
   noConnector: "この会話では ai-research の道具が見つからなかったので、組み込みの道具で調べます。結果には「経路外（ai-research が使えない）」と書き、確認済の印は付けないでください。",
   searchDown: "ai-research の検索が使えなかったので、組み込みの検索で調べます。結果には「経路外（ai-research で検索できなかった）」と書き、確認済の印は付けないでください。",
+} as const;
+
+/** verify の理由ごとの次の手（設計 v1.5 §8.3.7） */
+export const VERIFY_NEXT = {
+  no_citation: "主張に cite（段落 ID と、段落の text をそのまま写した引用）を付けて verify する。出典がなければ「背景知識」と書く。",
+  unknown_passage: "その段落 ID はこの調査にない。束・around・find で返った passageId を使う。",
+  stale_version: "steer の前の段落。steer の後の束の passageId で引き直す。",
+  not_in_source: "引用が段落にない。段落の text からそのまま写す（言い換えない）。",
+  marker_mismatch: "数字か否定が原文と違う。nearest の原文どおりに写す。",
+  near_miss: "原文と少し違う。nearest を見て、原文どおりに写す。",
+  quote_too_long: "引用は300字まで。主張に要る部分だけを写す。",
+  empty_quote: "引用が空。段落の text から写す。",
+  budget: "予算の上限で照合していない。未照合と書く。",
 } as const;
 
 /**
@@ -281,7 +296,7 @@ let cachedVersion: string | undefined;
 /** 手順・方針・上限・説明文の内容ハッシュ（実行記録の procedure_version） */
 export async function procedureVersion(): Promise<string> {
   if (!cachedVersion) {
-    const h = await textHash(JSON.stringify({ POLICY, CODE_TOOL_DESCRIPTION, ROUTE_DENY_REASON, ROUTE_ALLOW_CONTEXT, EMPTY_NEXT }));
+    const h = await textHash(JSON.stringify({ POLICY, CODE_TOOL_DESCRIPTION, ROUTE_DENY_REASON, ROUTE_ALLOW_CONTEXT, EMPTY_NEXT, VERIFY_NEXT }));
     cachedVersion = `${POLICY.revision}+${h.slice(0, 12)}`;
   }
   return cachedVersion;

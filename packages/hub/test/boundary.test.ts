@@ -65,3 +65,35 @@ describe("説明文の例は API の型に合う（設計 v1.4。例と型がず
     }
   });
 });
+
+describe("API の約束（設計 v1.5 §8.3.7）", () => {
+  it("around の before・after は3に丸め、clamped で知らせる（bad_input にしない）", async () => {
+    const { research } = fns();
+    const b = await research.start!({ question: "プロンプトキャッシュの前置き", mode: "lookup", urls: ["https://docs.example.com/cache"] });
+    const pid = b.passages[0].passageId;
+    const r = await research.around!(b.runId, pid, { before: 10, after: 5 });
+    expect(r.error).toBeUndefined();
+    expect(r.notices).toEqual(expect.arrayContaining([{ kind: "clamped", field: "before", max: 3 }, { kind: "clamped", field: "after", max: 3 }]));
+  });
+
+  it("verify の照合失敗・未照合に、理由ごとの次の手が付く", async () => {
+    const { research } = fns();
+    const b = await research.start!({ question: "プロンプトキャッシュの前置き", mode: "lookup", urls: ["https://docs.example.com/cache"] });
+    const v = await research.verify!(b.runId, [
+      { text: "a", cite: [] },
+      { text: "b", cite: [{ passageId: "p99999", quote: "x" }] },
+    ]);
+    expect(v.statuses[0]).toMatchObject({ status: "未照合", reason: "no_citation" });
+    expect(v.statuses[0].next).toContain("背景知識");
+    expect(v.statuses[1]).toMatchObject({ status: "照合失敗", reason: "unknown_passage" });
+    expect(v.statuses[1].next).toContain("passageId");
+  });
+
+  it("束は軽い：問いの文を繰り返さず、URL と同じ locator を省き、maxPassages で段落を絞れる", async () => {
+    const { research } = fns();
+    const b = await research.start!({ question: "取得先の制限とキャッシュ", mode: "survey", queries: ["limits", "cache"], maxPassages: 2 });
+    expect(b.question).toEqual({ version: 1 });
+    expect(b.passages.length).toBeLessThanOrEqual(2);
+    for (const s of Object.values(b.sources) as { url: string; locator?: string }[]) expect(s.locator).not.toBe(s.url);
+  });
+});

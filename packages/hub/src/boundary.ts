@@ -17,6 +17,7 @@ export const StartInput = z.object({
   mode: z.enum(["lookup", "survey"]),
   sources: sourceSet,
   waitMs: z.number().min(0).max(60_000).optional(),
+  maxPassages: z.number().int().min(1).max(50).optional(),
   scope: z.string().optional(),
   exclusions: z.array(z.string()).max(16).optional(),
   queries: strList,
@@ -37,7 +38,8 @@ export const NextOpts = z.object({ waitMs: z.number().min(0).max(60_000).optiona
 export const PassageIdInput = z.string().regex(/^[ph]\d{1,9}$/);
 export const FindInput = z.object({ source: z.string().min(1).max(2_000), text: z.string().trim().min(1).max(300) });
 export const FindOpts = z.object({ limit: z.number().int().min(1).optional() }).optional();
-export const AroundOpts = z.object({ before: z.number().int().min(0).max(3).optional(), after: z.number().int().min(0).max(3).optional() }).optional();
+/** before・after は 0〜3。超えた値は丸めて clamped で知らせる（bad_input で往復させない。設計 v1.5 §8.3.7） */
+export const AroundOpts = z.object({ before: z.number().int().min(0).optional(), after: z.number().int().min(0).optional() }).optional();
 
 export class BadInput extends Error {}
 
