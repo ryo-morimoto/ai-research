@@ -30,3 +30,13 @@ describe("PDF の文字（設計 v1.5 §8.3.4）", () => {
     await expect(pdfBlocks(new TextEncoder().encode("not a pdf"), { maxPages: 60, timeoutMs: 5_000 })).rejects.toThrow();
   });
 });
+
+describe("PDF の上付き（注番号）", () => {
+  it("上付きの注番号で、行や段落を切らない", async () => {
+    const r = await env.TEST_UPSTREAM!.fetch("https://repo.example.edu/superscript.pdf");
+    const out = await pdfBlocks(new Uint8Array(await r.arrayBuffer()), { maxPages: 60, timeoutMs: 5_000 });
+    const prose = out.blocks.filter((b) => b.kind === "prose").map((b) => b.text);
+    expect(prose).toHaveLength(1);
+    expect(prose[0]).toContain("in mice and humans in a large trial that ran for two years.");
+  });
+});

@@ -205,6 +205,17 @@ describe("進行中と喪失（設計 v1.5 §8.3.2、制約 Q-04）", () => {
     await stub.close();
   });
 
+  it("lookup で waitMs を短くしても、締め切りまでは集め続け、next で受け取れる", async () => {
+    const { id, stub } = newRun();
+    await patchEnv(stub, { TEST_DEADLINES: JSON.stringify({ fetchMs: 100_000 }) });
+    await upstreamSet({ url: "https://chain.example.com/page", delayMs: 200, contentType: "text/html", body: "<article><p>遅れて届く段落の本文で、長さが足りるように書いておく。</p></article>" });
+    const b = await stub.start(id, { mode: "lookup", question: "遅れて届く段落", urls: ["https://chain.example.com/page"], waitMs: 0 });
+    expect(b.done).toBe(false);
+    expect(b.pending.length).toBeGreaterThan(0);
+    const n = await stub.next(50_000);
+    expect(n.passages.some((p) => p.text.includes("遅れて届く"))).toBe(true);
+  });
+
   it("台帳の候補は、照らし直しが決着するまで出さない。終わりまで決着しなければ「取得できず未照合」", async () => {
     const l = ledger();
     const text = "遅い出典の抜き書きの文です。";

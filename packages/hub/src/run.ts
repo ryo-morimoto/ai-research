@@ -339,7 +339,11 @@ export class RunDO extends DurableObject<Env> {
           this.addDoc(v, d, origin);
           return;
         }
-        if (!r.ok) failures.push(`${r.cutoff.why}: ${u}`);
+        if (!r.ok) {
+          failures.push(`${r.cutoff.why}: ${u}`);
+          // 取れなかった公開の版の URL は、経路外で読めるようにする（cutoffs の urls に出る）
+          this.noteRouteCutoff(r.cutoff);
+        }
       }
       this.prog().failed++;
       this.addCutoff(v, { what: doc.source.url, why: "unsupported", detail: `公開の版を読めなかった（${failures.join("、").slice(0, 200)}）`, urls: candidates }, origin);
@@ -386,7 +390,11 @@ export class RunDO extends DurableObject<Env> {
         const passageId = `h${++this.counters.hit}`;
         const hit: HitEntry = { passageId, v, record, status: "照合中", deliveredStatus: null };
         this.hits.set(passageId, hit);
-        this.spawn(v, `照らし直し: ${record.url}`, "ledger", async (signal) => this.revalidate(v, hit, signal));
+        // 調査が先に終わっていたら照らし直しは始められない。照合中のまま残さず、決着させる（設計 v1.5 §8.3.2）
+        if (!this.spawn(v, `照らし直し: ${record.url}`, "ledger", async (signal) => this.revalidate(v, hit, signal))) {
+          hit.status = "取得できず未照合";
+          hit.reason = "調査の終わりまでに照らし直せなかった";
+        }
       }
       this.notify();
     });
@@ -418,12 +426,21 @@ export class RunDO extends DurableObject<Env> {
             this.fetchedUrls.add(url);
             this.workCount++;
             p.found++;
-            // 上位の論文だけ、抄録と公開の版を補う（API への負荷を抑える。設計 v1.5 §8.3.4）
-            const w = this.enrichCount < S.enrichMax ? (this.enrichCount++, await gw.enrich(w0, { oa: this.oaFollowed < oaCap })) : w0;
-            if (!this.current(v)) return;
-            const doc = await gw.workDoc(w);
+            if (this.enrichCount < S.enrichMax) {
+              // 上位の論文だけ、抄録と公開の版を補う（API への負荷を抑える。設計 v1.5 §8.3.4）。
+              // 論文ごとの作業にして、時間の上限つきで並べる（検索の作業を止めない。締め切りを守る）
+              this.enrichCount++;
+              this.spawn(v, `論文を補う: ${w0.title.slice(0, 60)}`, "search", async (sig) => {
+                const { work } = await this.gw().withSignal(sig).enrichWithin(w0, { oa: this.oaFollowed < oaCap });
+                if (!this.current(v)) return;
+                const doc = await this.gw().workDoc(work);
+                this.addDoc(v, doc, "search");
+                this.followRelated(v, doc, "search");
+              });
+              continue;
+            }
+            const doc = await gw.workDoc(w0);
             this.addDoc(v, doc, "search");
-            this.followRelated(v, doc, "search");
           }
         });
       }
@@ -477,6 +494,9 @@ export class RunDO extends DurableObject<Env> {
         hit.verifiedText = `${r.excerpt.ctxBefore}${r.excerpt.excerpt}${r.excerpt.ctxAfter}`;
         hit.fingerprint = doc.fingerprint;
         finish("引用確認済");
+      } else if (doc.partial) {
+        // 論文の抄録を補いきれなかった（取得の問題）。原文が変わったとは決めつけない
+        finish("取得できず未照合", "論文の抄録を取り直せなかった");
       } else {
         finish("照合失敗", "出典が変わり、抜き書きが見つからない");
       }
@@ -800,8 +820,24 @@ export class RunDO extends DurableObject<Env> {
     const mode = POLICY.modes[m.mode];
     const wait = waitMs === undefined ? mode.startMs : Math.min(mode.startMs, Math.max(0, waitMs));
     await this.waitUntil(() => !this.current(v) || this.unfinished(v).length === 0, wait);
-    // 続きを集めない種類（lookup）は、最初の束で終える。残りの作業は止める（設計 v1.3 §8.1.2）
-    const ends = !mode.continues && !m.deep;
+    // 続きを集めない種類（lookup）は、締め切り（startMs）で終える。残りの作業は止める（設計 v1.3 §8.1.2）。
+    // waitMs で早く返したときは、締め切りまで集め続け、next で受け取れる（設計 v1.5 §8.3.2）
+    let ends = !mode.continues && !m.deep;
+    if (ends && wait < mode.startMs && this.unfinished(v).length > 0) {
+      ends = false;
+      const rest = (mode.startMs - wait) * timeScale(this.env);
+      this.ctx.waitUntil(
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            if (this.current(v) && !m.done) {
+              this.finish("lookup");
+              this.abortAll();
+            }
+            resolve();
+          }, rest),
+        ),
+      );
+    }
     if (ends) this.finish("lookup");
     const b = this.buildBundle();
     if (ends) this.abortAll();
@@ -843,6 +879,9 @@ export class RunDO extends DurableObject<Env> {
     m.urls = urls;
     if (input.sources?.length) m.sources = [...new Set(input.sources)];
     m.progress = zeroProgress();
+    // 論文を補う数・公開の版を読む数は、問いの版ごと
+    this.enrichCount = 0;
+    this.oaFollowed = 0;
     if (m.done) m.done = false;
     // 古い版の作業を止める。終わっても結果には混ぜない（INV-10）
     for (const t of this.tasks.values()) if (t.v === old && !t.done) t.controller.abort();

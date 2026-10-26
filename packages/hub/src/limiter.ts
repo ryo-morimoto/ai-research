@@ -17,7 +17,10 @@ import { timed } from "./obs.ts";
  */
 type Lease = { leaseId: string; startAt: number; expiresAt: number };
 
-export type AcquireResult = { granted: true; leaseId: string; startAt: number; now: number } | { granted: false; retryAfterMs: number };
+/** tooLate：割り当てられる開始時刻が、待てる上限より先（枠を取らずに断る。冷却中なら cooldownUntil） */
+export type AcquireResult =
+  | { granted: true; leaseId: string; startAt: number; now: number }
+  | { granted: false; retryAfterMs: number; tooLate?: boolean; cooldownUntil?: number };
 
 export class HostLimiterDO extends DurableObject<Env> {
   private leases: Lease[] = [];
@@ -43,7 +46,8 @@ export class HostLimiterDO extends DurableObject<Env> {
     await timed("limiter.save", () => this.ctx.storage.put("state", state));
   }
 
-  async acquire(policy: HostPolicy, ttlMs: number): Promise<AcquireResult> {
+  /** maxWaitMs（実時間）：これより先の開始時刻になるなら、枠を取らずに断る（断った要求で次の枠が先へずれないように） */
+  async acquire(policy: HostPolicy, ttlMs: number, maxWaitMs = Number.POSITIVE_INFINITY): Promise<AcquireResult> {
     await this.load();
     const now = Date.now();
     const scale = timeScale(this.env);
@@ -55,6 +59,11 @@ export class HostLimiterDO extends DurableObject<Env> {
       return { granted: false, retryAfterMs: Math.max(1, Math.min(soonest - now, 1_000 * scale)) };
     }
     const startAt = Math.max(now, this.lastStart + minInterval, this.cooldownUntil);
+    if (startAt - now > maxWaitMs) {
+      const r: AcquireResult = { granted: false, retryAfterMs: startAt - now, tooLate: true };
+      if (this.cooldownUntil > now) r.cooldownUntil = this.cooldownUntil;
+      return r;
+    }
     const lease: Lease = { leaseId: crypto.randomUUID(), startAt, expiresAt: startAt + ttlMs * scale };
     this.leases.push(lease);
     this.lastStart = startAt;
@@ -107,8 +116,11 @@ export async function cooldownHost(env: Env, host: string, retryAfter: string | 
 }
 
 export class LeaseTimeout extends Error {
-  constructor(host: string) {
+  /** 取得先の冷却のために待てなかったときの再開の時刻（実時間） */
+  readonly cooldownUntil?: number;
+  constructor(host: string, cooldownUntil?: number) {
     super(`許可証を待つ時間が上限を超えた: ${host}`);
+    if (cooldownUntil) this.cooldownUntil = cooldownUntil;
   }
 }
 
@@ -128,13 +140,11 @@ export async function withLease<T>(
   const startedAt = Date.now();
   for (;;) {
     if (opts.signal?.aborted) throw new Error("aborted");
-    const r = await stub.acquire(policy, POLICY.leaseTtlMs);
+    const remaining = opts.waitLimitMs * scale - (Date.now() - startedAt); // 実時間
+    const r = await stub.acquire(policy, POLICY.leaseTtlMs, Math.max(0, remaining));
+    if (!r.granted && r.tooLate) throw new LeaseTimeout(host, r.cooldownUntil);
     if (r.granted) {
       const wait = r.startAt - r.now; // 実時間
-      if (wait > opts.waitLimitMs * scale) {
-        await stub.release(r.leaseId);
-        throw new LeaseTimeout(host);
-      }
       await sleep(wait / scale, env, opts.signal);
       try {
         return await fn();

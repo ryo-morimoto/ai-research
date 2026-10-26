@@ -35,7 +35,7 @@ import {
  */
 /** 取得した原文。blocks が型つきの塊（設計 v1.3 D10）、text はその全文（照合と照らし直しに使う） */
 /** related：この出典の本文が別の URL にあるときの候補（論文の公開の版。設計 v1.5 §8.3.4） */
-export type Doc = { source: Source; blocks: Block[]; text: string; fingerprint: Fingerprint; related?: string[] };
+export type Doc = { source: Source; blocks: Block[]; text: string; fingerprint: Fingerprint; related?: string[]; partial?: boolean };
 
 const isMarkdownPath = (p: string) => /\.(md|mdx|markdown)$/i.test(p);
 
@@ -204,6 +204,8 @@ export class Gateway {
   }
 
   private errorCutoff(url: string, e: unknown): Cutoff {
+    if (e instanceof LeaseTimeout && e.cooldownUntil)
+      return { what: url, why: "blocked", detail: `取得先が間を空けるよう求めている（${new Date(e.cooldownUntil).toISOString()} まで）` };
     if (e instanceof LeaseTimeout) return { what: url, why: "timeout", detail: "頻度制限の順番待ちが時間上限を超えた" };
     const name = (e as { name?: string })?.name;
     if (name === "AbortError" || /abort/i.test(String(e))) return { what: url, why: "timeout" };
@@ -221,11 +223,18 @@ export class Gateway {
       if (c.kind === "github") return await this.fetchGithub(c);
       if (c.kind === "arxiv") return await this.fetchArxiv(c);
       if (c.kind === "work") {
-        const key = `${c.doi ?? c.epmc?.id}:${opts.forCheck ? "check" : "full"}`;
-        let p = this.works.get(key);
+        // 同じ論文を同時に引いたら1回の取得を分け合う。照らし直しは、ふつうの取得（公開の版も探したもの）があればそれを使う
+        const id = c.doi ?? c.epmc?.id;
+        const full = this.works.get(`${id}:full`);
+        const key = `${id}:${opts.forCheck ? "check" : "full"}`;
+        let p = opts.forCheck && full ? full : this.works.get(key);
         if (!p) {
           p = this.fetchWork(c, !opts.forCheck);
           this.works.set(key, p);
+          // 中止・失敗した取得は分け合わない（次の作業で取り直せるように）
+          void p.then((r) => {
+            if (!r.ok || this.opts.signal?.aborted) this.works.delete(key);
+          });
         }
         return await p;
       }
@@ -264,36 +273,44 @@ export class Gateway {
     const doi = w.meta.doi;
     if (!doi) return w;
     const needAbstract = !w.abstract;
-    const es: Enrichment[] = [];
-    const tasks: Promise<void>[] = [];
-    if (this.env.OPENALEX_API_KEY && (needAbstract || opts.oa)) {
-      tasks.push(this.json(openAlexWorkUrl(doi, this.env.OPENALEX_API_KEY)).then((j) => void (j && es.push(enrichFromOpenAlex(j)))).catch(() => {}));
-    }
-    if (opts.oa && this.env.CONTACT_EMAIL) {
-      tasks.push(this.json(unpaywallUrl(doi, this.env.CONTACT_EMAIL)).then((j) => void (j && es.push(enrichFromUnpaywall(j)))).catch(() => {}));
-    }
-    await Promise.all(tasks);
+    const none: Enrichment = { oaUrls: [] };
+    const [oa, up] = await Promise.all([
+      this.env.OPENALEX_API_KEY && (needAbstract || opts.oa)
+        ? this.json(openAlexWorkUrl(doi, this.env.OPENALEX_API_KEY)).then((j) => (j ? enrichFromOpenAlex(j) : none))
+        : Promise.resolve(none),
+      opts.oa && this.env.CONTACT_EMAIL ? this.json(unpaywallUrl(doi, this.env.CONTACT_EMAIL)).then((j) => (j ? enrichFromUnpaywall(j) : none)) : Promise.resolve(none),
+    ]);
     // Semantic Scholar はキーなしの共有の上限なので、ほかで足りなかったときだけ
-    const still = needAbstract && !es.some((e) => e.abstract);
-    const noOa = opts.oa && !(w.oaUrls?.length || es.some((e) => e.oaUrls.length));
+    let s2 = none;
+    const still = needAbstract && !oa.abstract;
+    const noOa = opts.oa && !(w.oaUrls?.length || up.oaUrls.length || oa.oaUrls.length);
     if (still || noOa) {
-      const j = await this.json(semanticScholarUrl(doi)).catch(() => null);
-      if (j) es.push(enrichFromSemanticScholar(j));
+      const j = await this.json(semanticScholarUrl(doi));
+      if (j) s2 = enrichFromSemanticScholar(j);
     }
-    // 並びを決める（同じ入力から同じ抄録になるように）：OpenAlex → Semantic Scholar。公開の版は Unpaywall を先に
-    const order = (e: Enrichment) => (e.abstractFrom === "openalex" ? 0 : e.abstractFrom === "semanticscholar" ? 1 : 2);
-    es.sort((a, b) => order(a) - order(b));
-    const unpay = es.filter((e) => !e.abstractFrom && e.oaUrls.length);
-    return applyEnrichment(w, [...es.filter((e) => e.abstractFrom), ...unpay, ...es.filter((e) => !e.abstractFrom && !e.oaUrls.length)]);
+    // 並びは決まった順（同じ入力から同じ塊にする。設計 v1.5 §8.3.4）。
+    // 抄録：OpenAlex → Semantic Scholar。公開の版：論文がもともと持つ候補（PMC・Europe PMC）→ Unpaywall → OpenAlex → Semantic Scholar
+    const abstracts: Enrichment[] = [
+      { oaUrls: [], ...(oa.abstract ? { abstract: oa.abstract, abstractFrom: oa.abstractFrom } : {}) },
+      { oaUrls: [], ...(s2.abstract ? { abstract: s2.abstract, abstractFrom: s2.abstractFrom } : {}) },
+    ];
+    return applyEnrichment(w, [...abstracts, { oaUrls: up.oaUrls }, { oaUrls: oa.oaUrls }, { oaUrls: s2.oaUrls }]);
   }
 
-  private async json(url: string): Promise<unknown | null> {
-    const r = await this.raw(url, { headers: { Accept: "application/json" } });
-    if (!r.ok) return null;
+  /** JSON の API を引く。応答が得られなければ undefined（取得の失敗）、得られて中身がなければ null（見つからない） */
+  private async json(url: string): Promise<unknown | null | undefined> {
+    let r: Response;
+    try {
+      r = await this.raw(url, { headers: { Accept: "application/json" } });
+    } catch {
+      return undefined;
+    }
+    if (r.status === 404 || r.status === 410) return null;
+    if (!r.ok) return undefined;
     try {
       return await r.json();
     } catch {
-      return null;
+      return undefined;
     }
   }
 
@@ -301,20 +318,44 @@ export class Gateway {
   private async fetchWork(c: Extract<Classified, { kind: "work" }>, oa = true): Promise<FetchResult> {
     const q = c.doi ? `DOI:"${c.doi}"` : `EXT_ID:${c.epmc!.id} AND SRC:${c.epmc!.source}`;
     const [ej, cj] = await Promise.all([
-      this.json(epmcSearchUrl(q, 1)).catch(() => null),
-      c.doi ? this.json(crossrefWorkUrl(c.doi, this.env.CONTACT_EMAIL)).catch(() => null) : Promise.resolve(null),
+      this.json(epmcSearchUrl(q, 1)),
+      c.doi ? this.json(crossrefWorkUrl(c.doi, this.env.CONTACT_EMAIL)) : Promise.resolve(null),
     ]);
     const match = (w: Work) => (c.doi ? w.meta.doi === c.doi : w.epmc?.id === c.epmc!.id);
     const works = mergeWorks(worksFromEpmc(ej).filter(match), worksFromCrossref(cj).filter(match));
     const w = works[0];
-    if (!w) return this.fail(c.url, { what: c.url, why: "not_found", detail: "書誌が見つからない（Europe PMC、Crossref）" });
+    if (!w) {
+      // 応答が得られなかった（頻度制限・時間切れ）なら error、得られて載っていないなら not_found（DataCite の DOI など）
+      const failed = ej === undefined || (c.doi !== undefined && cj === undefined);
+      return this.fail(
+        c.url,
+        failed
+          ? { what: c.url, why: "error", detail: "書誌の API（Europe PMC、Crossref）から応答が得られなかった" }
+          : { what: c.url, why: "not_found", detail: "Europe PMC にも Crossref にも書誌がない（DataCite などの DOI かもしれない）" },
+      );
+    }
     // DOI で引いた論文は、抄録と公開の版を補う（設計 v1.5 §8.3.4）
-    // 補うのに時間の上限を付ける。間に合わなければ、補わずに返す（lookup の締め切りを守る）
-    const enriched = await Promise.race([
-      this.enrich(w, { oa }),
-      new Promise<Work>((resolve) => setTimeout(() => resolve(w), POLICY.scholarly.enrichTimeoutMs * timeScale(this.env))),
-    ]);
-    return { ok: true, doc: await this.workDoc(enriched) };
+    const { work: enriched, partial } = await this.enrichWithin(w, { oa });
+    const doc = await this.workDoc(enriched);
+    if (partial) doc.partial = true;
+    return { ok: true, doc };
+  }
+
+  /**
+   * 補うのに時間の上限を付ける。間に合わなければ、補わずに返す（締め切りを守る）。
+   * partial：補いきれなかった（抄録がほかの API にあるかもしれない）。照らし直しでは「変わった」と決めつけない
+   */
+  async enrichWithin(w: Work, opts: { oa: boolean }): Promise<{ work: Work; partial: boolean }> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), POLICY.scholarly.enrichTimeoutMs * timeScale(this.env));
+    });
+    try {
+      const r = await Promise.race([this.enrich(w, opts), late]);
+      return r ? { work: r, partial: false } : { work: w, partial: !w.abstract };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async workDoc(w: Work): Promise<Doc> {
@@ -378,9 +419,13 @@ export class Gateway {
     const htmlUrl = `https://arxiv.org/html/${c.id}${version ?? ""}`;
     if (!(await this.robotsAllow(htmlUrl))) return this.fail(c.url, { what: c.url, why: "robots" });
     const r = await this.raw(htmlUrl);
+    if (r.status === 429 || r.status === 503 || r.status === 403) {
+      return this.fail(c.url, { what: c.url, why: "blocked", detail: `HTTP ${r.status}` });
+    }
     if (!r.ok) {
-      // HTML 版がなければ PDF を読む（設計 v1.5 §8.3.4）
+      // HTML 版がなければ（404 など）PDF を読む（設計 v1.5 §8.3.4）。PDF にも robots.txt を当てる
       const pdfUrl = `https://arxiv.org/pdf/${c.id}${version ?? ""}`;
+      if (!(await this.robotsAllow(pdfUrl))) return this.fail(c.url, { what: c.url, why: "robots" });
       const p = await this.raw(pdfUrl);
       if (!p.ok) return this.fail(c.url, { what: c.url, why: "unsupported", detail: `HTML 版も PDF もない（HTTP ${r.status}・${p.status}）` });
       const pdf = await this.pdfDoc(c.url, new Uint8Array(await p.arrayBuffer()));

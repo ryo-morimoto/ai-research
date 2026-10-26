@@ -133,3 +133,17 @@ describe("拒まれたときの冷却と、並べて呼ぶ上限（設計 v1.5 �
     expect(rs.find((r) => r.error)!.error.next).toContain("次の code");
   });
 });
+
+describe("冷却中に断った要求で、次の枠が先へずれない", () => {
+  it("待てる上限より先の開始時刻なら、枠を取らずに断る（LeaseTimeout に再開の時刻）", async () => {
+    const stub = testEnv.LIMITER.get(testEnv.LIMITER.idFromName("cool.example.org"));
+    await stub.cooldown(120_000);
+    const policy = { pattern: "*", minIntervalMs: 1_000, maxConcurrent: 2 };
+    const a = await stub.acquire(policy, 60_000, 10);
+    const b = await stub.acquire(policy, 60_000, 10);
+    expect(a).toMatchObject({ granted: false, tooLate: true });
+    expect(b).toMatchObject({ granted: false, tooLate: true });
+    expect((a as { retryAfterMs: number }).retryAfterMs).toBeGreaterThanOrEqual((b as { retryAfterMs: number }).retryAfterMs - 5);
+    expect((await stub.history()).starts).toHaveLength(0);
+  });
+});

@@ -141,3 +141,19 @@ describe("DOI のそろえ方", () => {
     expect(doiOf("https://doi.org/10.1037//0022-3514.69.2.213")).toBe("10.1037/0022-3514.69.2.213");
   });
 });
+
+describe("書誌が見つからないのか、API に届かないのか（設計 v1.5 §8.3.4）", () => {
+  it("API が応えて載っていなければ not_found（DataCite の DOI など）。WebFetch は通す", async () => {
+    const { Gateway } = await import("../src/gateway.ts");
+    const r = await new Gateway(env).fetchDoc("https://doi.org/10.5281/zenodo.123456");
+    expect(!r.ok && r.cutoff.why).toBe("not_found");
+  });
+  it("API が失敗したら error（見つからないとは言わない）", async () => {
+    const { upstreamSet } = await import("./helpers.ts");
+    await upstreamSet({ url: "https://www.ebi.ac.uk/europepmc/webservices/rest/search", status: 500, body: "" });
+    await upstreamSet({ url: "https://api.crossref.org/works/10.5281/zenodo.999", status: 500, body: "" });
+    const { Gateway } = await import("../src/gateway.ts");
+    const r = await new Gateway(env).fetchDoc("https://doi.org/10.5281/zenodo.999");
+    expect(!r.ok && r.cutoff.why).toBe("error");
+  });
+});

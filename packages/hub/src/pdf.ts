@@ -43,23 +43,35 @@ async function read(bytes: Uint8Array, maxPages: number): Promise<PdfResult> {
   return { blocks, pages, readPages, truncated: readPages < pages };
 }
 
-type Line = { text: string; y: number };
+/** fs：その行の主な文字の大きさ（上付き・下付きを行の間と取り違えないため） */
+type Line = { text: string; y: number; fs: number };
+
+const fontSize = (it: Item) => Math.abs(it.transform?.[3] ?? 0) || Math.abs(it.transform?.[0] ?? 0) || 10;
 
 /** 文字の断片を行にまとめる（hasEOL か、縦の位置が変わったところで切る） */
 function toLines(items: Item[]): Line[] {
   const out: Line[] = [];
   let cur = "";
   let y: number | null = null;
+  let fs = 0;
   const flush = () => {
     const t = cur.replace(/\s+/g, " ").trim();
-    if (t && y !== null) out.push({ text: t, y });
+    if (t && y !== null) out.push({ text: t, y, fs: fs || 10 });
     cur = "";
+    fs = 0;
   };
   for (const it of items) {
     if (typeof it.str !== "string") continue;
     const iy = it.transform?.[5] ?? 0;
-    if (y !== null && Math.abs(iy - y) > 2 && cur) flush();
+    const f = fontSize(it);
+    // 縦の位置のずれが文字の大きさの 0.75 倍より小さければ同じ行（上付きの注番号・下付き）
+    if (y !== null && cur && Math.abs(iy - y) > 0.75 * Math.max(fs, f)) flush();
     if (!cur) y = iy;
+    // 行の位置と大きさは、その行でいちばん大きい文字（本文）で決める
+    if (f > fs) {
+      fs = f;
+      y = iy;
+    }
     cur += it.str;
     if (it.hasEOL) flush();
   }
@@ -75,8 +87,9 @@ function toParagraphs(lines: Line[]): string[] {
     const g = Math.abs(lines[i - 1]!.y - lines[i]!.y);
     if (g > 0) gaps.push(g);
   }
-  // ふつうの行の間：3ポイント以上の間の最小（段落の切れ目はそれより広い）。行が少ないページでも決まる
-  const typical = Math.min(...gaps.filter((g) => g >= 3), Number.POSITIVE_INFINITY);
+  // ふつうの行の間：文字の大きさ以上の間の最小（段落の切れ目はそれより広い）。行が少ないページでも決まる
+  const fsMedian = [...lines.map((l) => l.fs)].sort((a, b) => a - b)[Math.floor(lines.length / 2)] ?? 10;
+  const typical = Math.min(...gaps.filter((g) => g >= fsMedian * 0.9), Number.POSITIVE_INFINITY);
   const paras: string[] = [];
   let cur = "";
   for (let i = 0; i < lines.length; i++) {
@@ -90,7 +103,8 @@ function toParagraphs(lines: Line[]): string[] {
     }
     if (i > 0 && cur) {
       const g = Math.abs(lines[i - 1]!.y - lines[i]!.y);
-      const breakHere = Number.isFinite(typical) && (g > typical * 1.5 || lines[i]!.y > lines[i - 1]!.y + 1);
+      // 上へ戻った（段組みの次の列）か、ふつうの行の間の 1.5 倍より広い
+      const breakHere = Number.isFinite(typical) && (g > typical * 1.5 || lines[i]!.y > lines[i - 1]!.y + lines[i]!.fs);
       if (breakHere) {
         if (cur) paras.push(cur);
         cur = "";
