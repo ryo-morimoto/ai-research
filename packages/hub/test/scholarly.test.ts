@@ -79,7 +79,37 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
     await new Promise((r) => setTimeout(r, 50));
     expect(await routeStub(env).decide({ session: "s", tool: "WebFetch", url })).toMatchObject({ kind: "allow", why: "cutoff" });
     const { meta } = await inspect(stub);
-    expect(meta?.progress).toMatchObject({ fetched: 1, failed: 0 });
+    // 書誌と抄録（DOI）と、公開の版（OpenAlex・Unpaywall が示した PDF）の2つ
+    expect(meta?.progress).toMatchObject({ fetched: 2, failed: 0 });
+  });
+
+  it("DOI で引いた論文は公開の版（PDF）も読む。本文は論文の書誌つき・種類 paper の出典になる。連絡先とキーは決めた API にだけ送る", async () => {
+    const { id, stub } = newRun();
+    const b = await stub.start(id, { mode: "lookup", question: "intuitive expertise environment sufficiently regular opportunity to learn", urls: ["https://doi.org/10.1037/0033-2909.119.2.254"] });
+    const last = b.done ? b : await stub.next(50_000);
+    const all = [...b.passages, ...last.passages];
+    const srcs = { ...b.sources, ...last.sources };
+    const body = all.find((p) => p.text.includes("sufficiently regular"))!;
+    expect(body).toBeDefined();
+    expect(srcs[body.sourceId]).toMatchObject({ url: "https://repo.example.edu/kd1996.pdf", tier: "paper", work: { year: 1996 } });
+    expect(body.context).toBe("p. 1");
+    // 参考文献のページは段落にならない
+    expect(all.some((p) => p.text.startsWith("Klein, G. (1998)"))).toBe(false);
+    const log = await upstreamLog();
+    expect(log.find((l) => l.url.startsWith("https://api.crossref.org/works/10.1037"))!.url).toContain("mailto=contact%40example.com");
+    expect(log.find((l) => l.url.startsWith("https://api.unpaywall.org/"))!.url).toContain("email=contact%40example.com");
+    expect(log.find((l) => l.url.startsWith("https://api.openalex.org/"))!.url).toContain("api_key=test-openalex-key");
+    // 連絡先は検索サービスや取得先には送らない
+    for (const l of log.filter((x) => !/^https:\/\/api\.(crossref|unpaywall)\.org\//.test(x.url))) expect(l.url).not.toContain("contact%40example.com");
+  });
+
+  it("Europe PMC にも Crossref にも抄録がなければ OpenAlex の抄録を使う（Semantic Scholar より先）", async () => {
+    const { id, stub } = newRun();
+    const b = await stub.start(id, { mode: "lookup", question: "Asch impressions of personality formed as a whole", urls: ["https://doi.org/10.1037/h0055756"] });
+    const p = b.passages.find((x) => x.context === "Abstract")!;
+    expect(p.text).toBe("Impressions of personality are formed as a whole");
+    // Semantic Scholar は公開の版を探すためだけに引いた（抄録は OpenAlex のものを使う）
+    expect(b.passages.some((x) => x.text.includes("Semantic Scholar abstract"))).toBe(false);
   });
 
   it("台帳の出典の種類の CHECK に work を足す（古い表を写して入れ替える。冪等）", async () => {

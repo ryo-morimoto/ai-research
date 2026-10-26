@@ -28,6 +28,10 @@ export interface Env {
   TEST_DEADLINES?: string;
   /** 試験用：予算の上限の縮尺（1 なら方針どおり） */
   TEST_CAP_SCALE?: string;
+  /** OpenAlex のキー（抄録の索引と公開の版。なければ使わない。設計 v1.5 §8.3.4） */
+  OPENALEX_API_KEY?: string;
+  /** 連絡先（Crossref の polite pool と Unpaywall に送る。利用者が許した 2026-10-26。E-04） */
+  CONTACT_EMAIL?: string;
   /** 試験用：429・503 の冷却をしない */
   TEST_NO_BACKOFF?: string;
 }

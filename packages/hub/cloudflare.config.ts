@@ -30,6 +30,9 @@ export default defineConfig({
 			// 秘密の値は cf deploy --secrets-file で上げる
 			OWNER_PASSPHRASE: bindings.secret(),
 			BRAVE_API_KEY: bindings.secret(),
+			// 抄録の索引（OpenAlex）と、Crossref・Unpaywall に送る連絡先（設計 v1.5 §8.3.4）
+			OPENALEX_API_KEY: bindings.secret(),
+			CONTACT_EMAIL: bindings.secret(),
 			// OAuth の状態（cf kv namespaces create --title ai-research-oauth で作った名前空間）
 			OAUTH_KV: bindings.kv({
 				id: "cb6814a41b7c4530a5c75078f3279159",

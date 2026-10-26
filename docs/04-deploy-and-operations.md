@@ -67,7 +67,7 @@ pnpm exec cf kv namespaces create --title ai-research-oauth
 `cf dev`・`cf build`・`cf deploy` は `packages/hub/cloudflare.config.ts` を読む。この設定は `cf migrate` で `wrangler.jsonc` から作り、次を手で直したもの [8]。
 
 - **Durable Object**：`migrations` は変換されないので、3つのクラスを `exports` に SQLite で宣言した（`exports.durableObject({ storage: "sqlite" })`）。初回のデプロイで「Durable Object exports reconciliation: Created: HostLimiterDO, LedgerDO, RunDO」と出る。
-- **秘密の値**：`OWNER_PASSPHRASE` と `BRAVE_API_KEY` を `bindings.secret()` で宣言した。**宣言した秘密の値がそろっていないと、新しい Worker はデプロイできない**（「required secrets have not been set」で止まる）。検索に Tavily を使うなら `BRAVE_API_KEY` を `TAVILY_API_KEY` に替え、`SEARCH_PROVIDER` を `tavily` にする。
+- **秘密の値**：`OWNER_PASSPHRASE`・`BRAVE_API_KEY`・`OPENALEX_API_KEY`（OpenAlex のキー）・`CONTACT_EMAIL`（Crossref と Unpaywall に送る連絡先。利用者が許したもの）を `bindings.secret()` で宣言した。**宣言した秘密の値がそろっていないと、新しい Worker はデプロイできない**（「required secrets have not been set」で止まる）。検索に Tavily を使うなら `BRAVE_API_KEY` を `TAVILY_API_KEY` に替え、`SEARCH_PROVIDER` を `tavily` にする。
 - **Worker Loader**：`cf migrate` が `bindings.workerLoader()` に変換した。
 
 ### 2.4 秘密の値を用意する
@@ -78,6 +78,8 @@ pnpm exec cf kv namespaces create --title ai-research-oauth
 umask 077
 python3 -c 'import secrets;print("OWNER_PASSPHRASE="+secrets.token_urlsafe(32))' > .secrets.env   # 同意ページの合言葉
 echo 'BRAVE_API_KEY=<Brave Search API のキー>' >> .secrets.env
+echo 'OPENALEX_API_KEY=<OpenAlex のキー>' >> .secrets.env
+echo 'CONTACT_EMAIL=<Crossref・Unpaywall に送る連絡先>' >> .secrets.env
 ```
 
 ### 2.5 常設の方針を自分用にする

@@ -13,8 +13,10 @@ export type Work = {
   meta: WorkMeta;
   title: string;
   abstract?: string;
-  /** 抄録の出どころ（どちらの API の値か） */
-  abstractFrom?: "europepmc" | "crossref";
+  /** 抄録の出どころ（どの API の値か） */
+  abstractFrom?: "europepmc" | "crossref" | "openalex" | "semanticscholar";
+  /** 公開の版（本文）の URL の候補。良いものから（設計 v1.5 §8.3.4） */
+  oaUrls?: string[];
   /** Europe PMC の識別（DOI がないときの URL に使う） */
   epmc?: { source: string; id: string };
   isOpenAccess?: boolean;
@@ -87,6 +89,7 @@ type EpmcResult = {
   bookOrReportDetails?: { publisher?: string };
   abstractText?: string;
   isOpenAccess?: string;
+  fullTextUrlList?: { fullTextUrl?: { availabilityCode?: string; documentStyle?: string; url?: string }[] };
 };
 
 export function worksFromEpmc(json: unknown): Work[] {
@@ -117,6 +120,13 @@ export function worksFromEpmc(json: unknown): Work[] {
       w.abstractFrom = "europepmc";
     }
     if (r.isOpenAccess === "Y") w.isOpenAccess = true;
+    // 公開の版：PMC の記事のページを先に、次に公開（OA・Free）の全文リンク
+    const oa: string[] = [];
+    if (r.pmcid && r.isOpenAccess === "Y") oa.push(`https://pmc.ncbi.nlm.nih.gov/articles/${r.pmcid}/`);
+    for (const f of r.fullTextUrlList?.fullTextUrl ?? []) {
+      if (f.url && (f.availabilityCode === "OA" || f.availabilityCode === "F") && /pdf|html/i.test(f.documentStyle ?? "")) oa.push(f.url);
+    }
+    if (oa.length) w.oaUrls = [...new Set(oa)];
     out.push(w);
   }
   return out;
@@ -174,6 +184,7 @@ export function mergeWorks(epmc: Work[], crossref: Work[]): Work[] {
       have.abstractFrom = w.abstractFrom!;
     }
     if (!have.meta.venue && w.meta.venue) have.meta.venue = w.meta.venue;
+    if (w.oaUrls) have.oaUrls = [...new Set([...(have.oaUrls ?? []), ...w.oaUrls])];
     if (have.meta.year === undefined && w.meta.year !== undefined) have.meta.year = w.meta.year;
     if (have.meta.authors.length === 0) have.meta.authors = w.meta.authors;
   }
@@ -229,8 +240,69 @@ export function workSource(w: Work): { source: Source; blocks: Block[] } {
   return { source, blocks };
 }
 
+/** OpenAlex の抄録（単語→位置の索引）を文に戻す */
+export function fromInvertedIndex(idx: Record<string, number[]> | null | undefined): string {
+  if (!idx) return "";
+  const words: string[] = [];
+  for (const [w, ps] of Object.entries(idx)) for (const p of ps) words[p] = w;
+  return words.filter((x) => x !== undefined).join(" ").trim();
+}
+
+/** 抄録と公開の版を補う API の応答（OpenAlex・Semantic Scholar・Unpaywall） */
+export type Enrichment = { abstract?: string; abstractFrom?: Work["abstractFrom"]; oaUrls: string[] };
+
+export function enrichFromOpenAlex(json: unknown): Enrichment {
+  const j = json as { abstract_inverted_index?: Record<string, number[]>; open_access?: { oa_url?: string | null }; best_oa_location?: { pdf_url?: string | null } } | null;
+  const out: Enrichment = { oaUrls: [j?.best_oa_location?.pdf_url, j?.open_access?.oa_url].filter((x): x is string => !!x) };
+  const abs = fromInvertedIndex(j?.abstract_inverted_index);
+  if (abs) {
+    out.abstract = abs;
+    out.abstractFrom = "openalex";
+  }
+  return out;
+}
+
+export function enrichFromSemanticScholar(json: unknown): Enrichment {
+  const j = json as { abstract?: string | null; openAccessPdf?: { url?: string | null } | null } | null;
+  const out: Enrichment = { oaUrls: j?.openAccessPdf?.url ? [j.openAccessPdf.url] : [] };
+  if (j?.abstract) {
+    out.abstract = j.abstract.trim();
+    out.abstractFrom = "semanticscholar";
+  }
+  return out;
+}
+
+export function enrichFromUnpaywall(json: unknown): Enrichment {
+  const j = json as { best_oa_location?: { url_for_pdf?: string | null; url?: string | null } | null } | null;
+  return { oaUrls: [j?.best_oa_location?.url_for_pdf, j?.best_oa_location?.url].filter((x): x is string => !!x) };
+}
+
+/** 補った値を論文に足す（抄録は持っていないときだけ。公開の版は後ろに足す） */
+export function applyEnrichment(w: Work, es: Enrichment[]): Work {
+  const out: Work = { ...w, meta: { ...w.meta } };
+  for (const e of es) {
+    if (!out.abstract && e.abstract) {
+      out.abstract = e.abstract;
+      out.abstractFrom = e.abstractFrom!;
+    }
+  }
+  const oa = [...new Set([...(w.oaUrls ?? []), ...es.flatMap((e) => e.oaUrls)])].filter((u) => /^https?:\/\//.test(u) && u !== workUrl(w));
+  if (oa.length) out.oaUrls = oa;
+  return out;
+}
+
+export const openAlexWorkUrl = (doi: string, key: string) =>
+  `https://api.openalex.org/works/doi:${doi.split("/").map(encodeURIComponent).join("/")}?select=abstract_inverted_index,open_access,best_oa_location&api_key=${encodeURIComponent(key)}`;
+export const semanticScholarUrl = (doi: string) =>
+  `https://api.semanticscholar.org/graph/v1/paper/DOI:${doi.split("/").map(encodeURIComponent).join("/")}?fields=abstract,openAccessPdf`;
+export const unpaywallUrl = (doi: string, email: string) =>
+  `https://api.unpaywall.org/v2/${doi.split("/").map(encodeURIComponent).join("/")}?email=${encodeURIComponent(email)}`;
+
 export const epmcSearchUrl = (query: string, pageSize: number) =>
   `${EPMC_BASE}/search?query=${encodeURIComponent(query)}&format=json&resultType=core&pageSize=${pageSize}`;
-export const crossrefSearchUrl = (query: string, rows: number) =>
-  `${CROSSREF_BASE}/works?query.bibliographic=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,issued,container-title,abstract,type`;
-export const crossrefWorkUrl = (doi: string) => `${CROSSREF_BASE}/works/${doi.split("/").map(encodeURIComponent).join("/")}`;
+/** mailto：Crossref の polite pool の連絡先（利用者が許した。2026-10-26。E-04） */
+const mailto = (email?: string) => (email ? `mailto=${encodeURIComponent(email)}` : "");
+export const crossrefSearchUrl = (query: string, rows: number, email?: string) =>
+  `${CROSSREF_BASE}/works?query.bibliographic=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,issued,container-title,abstract,type${email ? `&${mailto(email)}` : ""}`;
+export const crossrefWorkUrl = (doi: string, email?: string) =>
+  `${CROSSREF_BASE}/works/${doi.split("/").map(encodeURIComponent).join("/")}${email ? `?${mailto(email)}` : ""}`;

@@ -56,6 +56,7 @@ import type {
 } from "@ai-research/sandbox-api";
 import type { Env } from "./env.ts";
 import { Gateway, classifyUrl, type Doc } from "./gateway.ts";
+import { workUrl } from "./scholarly.ts";
 import { ledgerStub, type LedgerRecord } from "./ledger.ts";
 import { routeStub, urlKey } from "./route.ts";
 import { deadlines, timeScale } from "./time.ts";
@@ -162,6 +163,9 @@ export class RunDO extends DurableObject<Env> {
   private counters = { task: 0, source: 0, passage: 0, hit: 0, ev: 0 };
   /** この実行で足した論文の数（POLICY.scholarly.maxWorks まで） */
   private workCount = 0;
+  /** 公開の版（本文）を読みに行った論文の数と、抄録・公開の版を補った論文の数（設計 v1.5 §8.3.4） */
+  private oaFollowed = 0;
+  private enrichCount = 0;
   private events: RunEvent[] = [];
   /** 段落が選ばれなかったと知らせた出典（`${版}:${sourceId}`）。二度知らせない */
   private noPassageReported = new Set<string>();
@@ -304,6 +308,36 @@ export class RunDO extends DurableObject<Env> {
     }
   }
 
+  /**
+   * 論文の公開の版（本文）を読む（設計 v1.5 §8.3.4）。候補を順に試し、最初に取れたものを、その論文の書誌つきの出典にする。
+   * 1回の調査で読む論文の数は POLICY.scholarly.openAccessPages まで
+   */
+  private followRelated(v: number, doc: Doc, origin: CutoffOrigin): void {
+    const m = this.meta!;
+    const cap = POLICY.scholarly.openAccessPages[m.mode];
+    const candidates = (doc.related ?? []).filter((u) => !this.fetchedUrls.has(u));
+    if (candidates.length === 0 || this.oaFollowed >= cap) return;
+    this.oaFollowed++;
+    for (const u of candidates) this.fetchedUrls.add(u);
+    this.spawn(v, `公開の版: ${doc.source.title ?? doc.source.url}`, origin, async (signal) => {
+      const gw = this.gw().withSignal(signal);
+      const failures: string[] = [];
+      for (const u of candidates) {
+        const r = await gw.fetchDoc(u);
+        if (!this.current(v)) return;
+        if (r.ok && "doc" in r) {
+          const d = r.doc;
+          d.source = { ...d.source, title: `${doc.source.title ?? ""}（公開の版）`, ...(doc.source.work ? { work: doc.source.work } : {}) };
+          this.addDoc(v, d, origin);
+          return;
+        }
+        if (!r.ok) failures.push(`${r.cutoff.why}: ${u}`);
+      }
+      this.prog().failed++;
+      this.addCutoff(v, { what: doc.source.url, why: "unsupported", detail: `公開の版を読めなかった（${failures.join("、").slice(0, 200)}）`, urls: candidates }, origin);
+    });
+  }
+
   private launch(v: number, opts: { queries: string[]; urls: string[]; question: string; extra?: boolean }): void {
     const m = this.meta!;
     const maxSources = POLICY.search.maxSourcesPerRun * (m.deep ? 2 : 1);
@@ -321,6 +355,7 @@ export class RunDO extends DurableObject<Env> {
           if (!this.current(v)) return;
           if (r.ok && "doc" in r) {
             this.addDoc(v, r.doc, origin);
+            this.followRelated(v, r.doc, origin);
             // ページは取れず、DOI から書誌と抄録に取り直した。ページは経路外で読めるようにする（束の打ち切りには出さない）
             if (r.fallbackFrom) this.noteRouteCutoff(r.fallbackFrom);
           }
@@ -357,7 +392,7 @@ export class RunDO extends DurableObject<Env> {
     // 論文の検索（設計 v1.4 §8.2.2）。書誌と抄録は検索の応答にあるので、取得し直さずに出典にする
     if (sources.includes("scholarly")) {
       const S = POLICY.scholarly;
-      let oaPages = 0;
+      const oaCap = S.openAccessPages[m.mode];
       for (const q of queries.slice(0, S.queriesMax)) {
         this.spawn(v, `論文の検索: ${q}`, "system", async (signal) => {
           const r = await this.gw().withSignal(signal).searchScholarly(q, S.perQuery);
@@ -368,18 +403,19 @@ export class RunDO extends DurableObject<Env> {
             p.searchFailed++;
             return this.addCutoff(v, r.cutoff, "system");
           }
-          for (const w of r.works) {
-            const doc = await this.gw().workDoc(w);
-            if (!this.current(v) || this.fetchedUrls.has(doc.source.url) || this.workCount >= S.maxWorks) continue;
-            this.fetchedUrls.add(doc.source.url);
+          const gw = this.gw().withSignal(signal);
+          for (const w0 of r.works) {
+            const url = workUrl(w0);
+            if (!this.current(v) || this.fetchedUrls.has(url) || this.workCount >= S.maxWorks) continue;
+            this.fetchedUrls.add(url);
             this.workCount++;
             p.found++;
-            this.addDoc(v, doc);
-            // 公開の版（PMC）があれば、survey では本文のページも読む
-            if (w.meta.pmcid && w.isOpenAccess && mode.continues && oaPages < S.openAccessPages) {
-              oaPages++;
-              fetchUrl(`https://pmc.ncbi.nlm.nih.gov/articles/${w.meta.pmcid}/`, "search");
-            }
+            // 上位の論文だけ、抄録と公開の版を補う（API への負荷を抑える。設計 v1.5 §8.3.4）
+            const w = this.enrichCount < S.enrichMax ? (this.enrichCount++, await gw.enrich(w0, { oa: this.oaFollowed < oaCap })) : w0;
+            if (!this.current(v)) return;
+            const doc = await gw.workDoc(w);
+            this.addDoc(v, doc, "search");
+            this.followRelated(v, doc, "search");
           }
         });
       }

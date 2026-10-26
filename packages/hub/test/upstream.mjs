@@ -141,6 +141,31 @@ DEFAULTS.set("https://pmc.ncbi.nlm.nih.gov/articles/PMC9486774/", {
   ]),
 });
 
+// 抄録と公開の版を補う API と、PDF（設計 v1.5 §8.3.4）
+const KK_PDF_FOR_TEST = "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUiA1IDAgUl0gL0NvdW50IDIgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA3IDAgUiA+PiA+PiAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCAzODYgPj4Kc3RyZWFtCkJUIC9GMSAxMSBUZiA3MiA3MjAgVGQgMTQgVEwKKENvbmRpdGlvbnMgZm9yIGludHVpdGl2ZSBleHBlcnRpc2UpIFRqIFQqCigpIFRqIFQqCihTa2lsbGVkIGludHVpdGlvbnMgZGV2ZWxvcCB3aGVuIHRoZSBlbnZpcm9ubWVudCBpcyBzdWZmaWNpZW50bHkgcmVndWxhcikgVGogVCoKKGFuZCB3aGVuIHBlb3BsZSBoYXZlIGFuIG9wcG9ydHVuaXR5IHRvIGxlYXJuIHRoZXNlIHJlZ3VsYXJpdGllcyB0aHJvdWdoKSBUaiBUKgoocHJvbG9uZ2VkIHByYWN0aWNlLikgVGogVCoKKCkgVGogVCoKKFN1YmplY3RpdmUgY29uZmlkZW5jZSBpcyBub3QgYSByZWxpYWJsZSBpbmRpY2F0b3Igb2YgdGhlIHZhbGlkaXR5IG9mKSBUaiBUKgooaW50dWl0aXZlIGp1ZGdtZW50cy4pIFRqIFQqCkVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvUGFnZSAvUGFyZW50IDIgMCBSIC9NZWRpYUJveCBbMCAwIDYxMiA3OTJdIC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDcgMCBSID4+ID4+IC9Db250ZW50cyA2IDAgUiA+PgplbmRvYmoKNiAwIG9iago8PCAvTGVuZ3RoIDEzMSA+PgpzdHJlYW0KQlQgL0YxIDExIFRmIDcyIDcyMCBUZCAxNCBUTAooUmVmZXJlbmNlcykgVGogVCoKKCkgVGogVCoKKEtsZWluLCBHLiBcKDE5OThcKS4gU291cmNlcyBvZiBwb3dlci4gQ2FtYnJpZGdlLCBNQTogTUlUIFByZXNzLikgVGogVCoKRVQKZW5kc3RyZWFtCmVuZG9iago3IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDgKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDEyMSAwMDAwMCBuIAowMDAwMDAwMjQ3IDAwMDAwIG4gCjAwMDAwMDA2ODQgMDAwMDAgbiAKMDAwMDAwMDgxMCAwMDAwMCBuIAowMDAwMDAwOTkyIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgOCAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMTA2MgolJUVPRgo=";
+const ASCH_DOI = "10.1037/h0055756";
+DEFAULTS.set(`https://api.openalex.org/works/doi:${KD_DOI}`, {
+  contentType: "application/json",
+  body: JSON.stringify({ open_access: { oa_url: "https://repo.example.edu/kd1996.pdf" }, best_oa_location: { pdf_url: "https://repo.example.edu/kd1996.pdf" } }),
+});
+DEFAULTS.set(`https://api.unpaywall.org/v2/${KD_DOI}`, {
+  contentType: "application/json",
+  body: JSON.stringify({ best_oa_location: { url_for_pdf: "https://repo.example.edu/kd1996.pdf", url: "https://repo.example.edu/kd1996" } }),
+});
+DEFAULTS.set("https://repo.example.edu/kd1996.pdf", { contentType: "application/pdf", bodyBase64: KK_PDF_FOR_TEST });
+DEFAULTS.set(`https://api.crossref.org/works/${ASCH_DOI}`, {
+  contentType: "application/json",
+  body: JSON.stringify({ message: { DOI: ASCH_DOI, title: ["Forming impressions of personality."], author: [{ given: "S. E.", family: "Asch" }], issued: { "date-parts": [[1946]] }, "container-title": ["The Journal of Abnormal and Social Psychology"], type: "journal-article" } }),
+});
+DEFAULTS.set(`https://api.openalex.org/works/doi:${ASCH_DOI}`, {
+  contentType: "application/json",
+  body: JSON.stringify({ abstract_inverted_index: { Impressions: [0], of: [1], personality: [2], are: [3], formed: [4], as: [5], a: [6], whole: [7] } }),
+});
+DEFAULTS.set(`https://api.semanticscholar.org/graph/v1/paper/DOI:${ASCH_DOI}`, {
+  contentType: "application/json",
+  body: JSON.stringify({ abstract: "Semantic Scholar abstract that should not be used when OpenAlex has one.", openAccessPdf: null }),
+});
+
 const SEARCH = {
   limits: ["https://docs.example.com/limits", "https://www.youtube.com/watch?v=x", "https://blocked.example.com/page"],
   cache: ["https://docs.example.com/cache"],
@@ -197,6 +222,10 @@ export default {
     if (spec.etag) headers.set("etag", spec.etag);
     if (spec.lastModified) headers.set("last-modified", spec.lastModified);
     if (spec.etag && request.headers.get("if-none-match") === spec.etag) return new Response(null, { status: 304, headers });
+    if (spec.bodyBase64) {
+      const bin = Uint8Array.from(atob(spec.bodyBase64), (c) => c.charCodeAt(0));
+      return new Response(bin, { status: spec.status ?? 200, headers });
+    }
     return new Response(spec.body ?? "", { status: spec.status ?? 200, headers });
   },
 };

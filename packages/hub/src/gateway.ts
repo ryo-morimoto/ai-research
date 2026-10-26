@@ -6,7 +6,16 @@ import { withLease, LeaseTimeout, cooldownHost } from "./limiter.ts";
 import { parseRobots, isAllowed, type RobotsRules } from "./robots.ts";
 import { extractHtml, metaRefreshTarget } from "./extract.ts";
 import { deadlines, timeScale } from "./time.ts";
+import { pdfBlocks } from "./pdf.ts";
 import {
+  applyEnrichment,
+  enrichFromOpenAlex,
+  enrichFromSemanticScholar,
+  enrichFromUnpaywall,
+  openAlexWorkUrl,
+  semanticScholarUrl,
+  unpaywallUrl,
+  type Enrichment,
   crossrefSearchUrl,
   crossrefWorkUrl,
   doiOf,
@@ -25,7 +34,8 @@ import {
  * - 要約を挟まない取得経路（S-03）：GitHub は raw、arXiv は HTML、Web は本文抽出
  */
 /** 取得した原文。blocks が型つきの塊（設計 v1.3 D10）、text はその全文（照合と照らし直しに使う） */
-export type Doc = { source: Source; blocks: Block[]; text: string; fingerprint: Fingerprint };
+/** related：この出典の本文が別の URL にあるときの候補（論文の公開の版。設計 v1.5 §8.3.4） */
+export type Doc = { source: Source; blocks: Block[]; text: string; fingerprint: Fingerprint; related?: string[] };
 
 const isMarkdownPath = (p: string) => /\.(md|mdx|markdown)$/i.test(p);
 
@@ -217,6 +227,51 @@ export class Gateway {
     }
   }
 
+  /** PDF の文字を塊にする。大きさ・ページ数・時間に上限（POLICY.pdf） */
+  private async pdfDoc(url: string, bytes: Uint8Array): Promise<{ ok: true; blocks: Block[] } | { ok: false; cutoff: Cutoff }> {
+    const P = POLICY.pdf;
+    if (bytes.byteLength > P.maxBytes) return { ok: false, cutoff: { what: url, why: "unsupported", detail: `PDF が大きすぎる（${Math.round(bytes.byteLength / 1e6)}MB。上限 ${P.maxBytes / 1e6}MB）` } };
+    try {
+      const r = await pdfBlocks(bytes, { maxPages: P.maxPages, timeoutMs: P.timeoutMs * timeScale(this.env) });
+      if (r.blocks.length === 0) return { ok: false, cutoff: { what: url, why: "unsupported", detail: "PDF に文字がない（画像だけの PDF など）" } };
+      if (r.truncated) r.blocks.push({ kind: "meta", text: `PDF の ${r.pages} ページのうち、最初の ${r.readPages} ページだけを読んだ`, context: "取得の注記" });
+      return { ok: true, blocks: r.blocks };
+    } catch (e) {
+      return { ok: false, cutoff: { what: url, why: "unsupported", detail: `PDF を読めない（${String((e as Error)?.message ?? e).slice(0, 120)}）` } };
+    }
+  }
+
+  /**
+   * 論文の抄録と公開の版を補う（設計 v1.5 §8.3.4）。抄録がなければ OpenAlex（キーがあれば）→ Semantic Scholar。
+   * 公開の版は、oa が真のときだけ Unpaywall（連絡先があれば）・OpenAlex・Semantic Scholar から集める
+   */
+  async enrich(w: Work, opts: { oa: boolean }): Promise<Work> {
+    const doi = w.meta.doi;
+    if (!doi) return w;
+    const needAbstract = !w.abstract;
+    const es: Enrichment[] = [];
+    const tasks: Promise<void>[] = [];
+    if (this.env.OPENALEX_API_KEY && (needAbstract || opts.oa)) {
+      tasks.push(this.json(openAlexWorkUrl(doi, this.env.OPENALEX_API_KEY)).then((j) => void (j && es.push(enrichFromOpenAlex(j)))).catch(() => {}));
+    }
+    if (opts.oa && this.env.CONTACT_EMAIL) {
+      tasks.push(this.json(unpaywallUrl(doi, this.env.CONTACT_EMAIL)).then((j) => void (j && es.push(enrichFromUnpaywall(j)))).catch(() => {}));
+    }
+    await Promise.all(tasks);
+    // Semantic Scholar はキーなしの共有の上限なので、ほかで足りなかったときだけ
+    const still = needAbstract && !es.some((e) => e.abstract);
+    const noOa = opts.oa && !(w.oaUrls?.length || es.some((e) => e.oaUrls.length));
+    if (still || noOa) {
+      const j = await this.json(semanticScholarUrl(doi)).catch(() => null);
+      if (j) es.push(enrichFromSemanticScholar(j));
+    }
+    // 並びを決める（同じ入力から同じ抄録になるように）：OpenAlex → Semantic Scholar。公開の版は Unpaywall を先に
+    const order = (e: Enrichment) => (e.abstractFrom === "openalex" ? 0 : e.abstractFrom === "semanticscholar" ? 1 : 2);
+    es.sort((a, b) => order(a) - order(b));
+    const unpay = es.filter((e) => !e.abstractFrom && e.oaUrls.length);
+    return applyEnrichment(w, [...es.filter((e) => e.abstractFrom), ...unpay, ...es.filter((e) => !e.abstractFrom && !e.oaUrls.length)]);
+  }
+
   private async json(url: string): Promise<unknown | null> {
     const r = await this.raw(url, { headers: { Accept: "application/json" } });
     if (!r.ok) return null;
@@ -232,18 +287,21 @@ export class Gateway {
     const q = c.doi ? `DOI:"${c.doi}"` : `EXT_ID:${c.epmc!.id} AND SRC:${c.epmc!.source}`;
     const [ej, cj] = await Promise.all([
       this.json(epmcSearchUrl(q, 1)).catch(() => null),
-      c.doi ? this.json(crossrefWorkUrl(c.doi)).catch(() => null) : Promise.resolve(null),
+      c.doi ? this.json(crossrefWorkUrl(c.doi, this.env.CONTACT_EMAIL)).catch(() => null) : Promise.resolve(null),
     ]);
     const match = (w: Work) => (c.doi ? w.meta.doi === c.doi : w.epmc?.id === c.epmc!.id);
     const works = mergeWorks(worksFromEpmc(ej).filter(match), worksFromCrossref(cj).filter(match));
     const w = works[0];
-    if (!w) return this.fail(c.url, { what: c.url, why: "error", detail: "書誌が見つからない（Europe PMC、Crossref）" });
-    return { ok: true, doc: await this.workDoc(w) };
+    if (!w) return this.fail(c.url, { what: c.url, why: "not_found", detail: "書誌が見つからない（Europe PMC、Crossref）" });
+    // DOI で引いた論文は、抄録と公開の版を補う（設計 v1.5 §8.3.4）
+    return { ok: true, doc: await this.workDoc(await this.enrich(w, { oa: true })) };
   }
 
   async workDoc(w: Work): Promise<Doc> {
     const { source, blocks } = workSource(w);
-    return makeDoc(source, blocks);
+    const doc = await makeDoc(source, blocks);
+    if (w.oaUrls?.length) doc.related = w.oaUrls.slice(0, POLICY.scholarly.relatedMax);
+    return doc;
   }
 
   /**
@@ -253,7 +311,7 @@ export class Gateway {
   async searchScholarly(query: string, n: number): Promise<{ ok: true; works: Work[] } | { ok: false; cutoff: Cutoff }> {
     const [ej, cj] = await Promise.all([
       this.json(epmcSearchUrl(query, n)).catch(() => null),
-      this.json(crossrefSearchUrl(query, n)).catch(() => null),
+      this.json(crossrefSearchUrl(query, n, this.env.CONTACT_EMAIL)).catch(() => null),
     ]);
     if (ej === null && cj === null) return { ok: false, cutoff: { what: `論文の検索: ${query}`, why: "error", detail: "Europe PMC と Crossref の両方に届かない" } };
     return { ok: true, works: mergeWorks(worksFromEpmc(ej), worksFromCrossref(cj)) };
@@ -300,7 +358,16 @@ export class Gateway {
     const htmlUrl = `https://arxiv.org/html/${c.id}${version ?? ""}`;
     if (!(await this.robotsAllow(htmlUrl))) return this.fail(c.url, { what: c.url, why: "robots" });
     const r = await this.raw(htmlUrl);
-    if (!r.ok) return this.fail(c.url, { what: c.url, why: "unsupported", detail: `HTML 版がない（HTTP ${r.status}）。PDF は未対応` });
+    if (!r.ok) {
+      // HTML 版がなければ PDF を読む（設計 v1.5 §8.3.4）
+      const pdfUrl = `https://arxiv.org/pdf/${c.id}${version ?? ""}`;
+      const p = await this.raw(pdfUrl);
+      if (!p.ok) return this.fail(c.url, { what: c.url, why: "unsupported", detail: `HTML 版も PDF もない（HTTP ${r.status}・${p.status}）` });
+      const pdf = await this.pdfDoc(c.url, new Uint8Array(await p.arrayBuffer()));
+      if (!pdf.ok) return this.fail(c.url, pdf.cutoff);
+      const source: Source = { kind: "arxiv", url: `https://arxiv.org/abs/${c.id}`, locator: `arXiv:${c.id}${version ?? ""}` };
+      return { ok: true, doc: await makeDoc(source, pdf.blocks, version ? { arxivVersion: version } : {}) };
+    }
     const html = (await r.text()).slice(0, MAX_BODY_CHARS);
     const { title, blocks } = toBlocks(html, "html", htmlUrl);
     const source: Source = { kind: "arxiv", url: `https://arxiv.org/abs/${c.id}`, locator: `arXiv:${c.id}${version ?? ""}` };
@@ -322,8 +389,17 @@ export class Gateway {
     if (r.status === 404 || r.status === 410) return this.fail(url, { what: url, why: "not_found", detail: `HTTP ${r.status}` });
     if (!r.ok) return this.fail(url, { what: url, why: "error", detail: `HTTP ${r.status}` });
     const ct = r.headers.get("content-type") ?? "";
-    if (/pdf/i.test(ct)) return this.fail(url, { what: url, why: "unsupported", detail: "PDF は未対応" });
-    const body = (await r.text()).slice(0, MAX_BODY_CHARS);
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    const fp0: Omit<Fingerprint, "textHash"> = {};
+    if (r.headers.get("etag")) fp0.etag = r.headers.get("etag")!;
+    if (r.headers.get("last-modified")) fp0.lastModified = r.headers.get("last-modified")!;
+    // PDF（設計 v1.5 §8.3.4）：content-type か、先頭の %PDF で見分ける
+    if (/pdf/i.test(ct) || (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) {
+      const pdf = await this.pdfDoc(url, bytes);
+      if (!pdf.ok) return this.fail(url, pdf.cutoff);
+      return { ok: true, doc: await makeDoc({ kind: "web", url, locator: url }, pdf.blocks, fp0) };
+    }
+    const body = new TextDecoder().decode(bytes).slice(0, MAX_BODY_CHARS);
     const isHtml = /html/i.test(ct) || /^\s*<(!doctype|html)/i.test(body);
     if (isHtml && hops === 0) {
       // <meta http-equiv="refresh"> の転送（例：…/releases/latest/）は1回だけ追う。転送先にも方針と robots を当てる

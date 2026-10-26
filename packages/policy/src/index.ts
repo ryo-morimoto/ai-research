@@ -36,6 +36,12 @@ export const POLICY = {
     // 書誌・抄録の API（設計 v1.4 §8.2.2）。Europe PMC は公表値がないので 1秒に5回、Crossref は同時に1つ
     { pattern: "www.ebi.ac.uk", minIntervalMs: 200, maxConcurrent: 2 },
     { pattern: "api.crossref.org", minIntervalMs: 250, maxConcurrent: 1 },
+    // 抄録と公開の版を補う API（設計 v1.5 §8.3.4）。Semantic Scholar はキーなしの共有の上限なので控えめに
+    { pattern: "api.semanticscholar.org", minIntervalMs: 1_000, maxConcurrent: 1 },
+    { pattern: "api.openalex.org", minIntervalMs: 200, maxConcurrent: 2 },
+    { pattern: "api.unpaywall.org", minIntervalMs: 200, maxConcurrent: 2 },
+    // Web Archive は 429 を返した（10/25）。間を広くとる
+    { pattern: "web.archive.org", minIntervalMs: 4_000, maxConcurrent: 1 },
   ] satisfies HostPolicy[],
   defaultHost: { pattern: "*", minIntervalMs: 1_000, maxConcurrent: 2 } satisfies HostPolicy,
   leaseTtlMs: 60_000,
@@ -114,7 +120,19 @@ export const POLICY = {
    * 論文の検索（設計 v1.4 §8.2.2）。検索語の上限、1つの検索語で引く件数、1回の調査で足す論文の上限。
    * openAccessPages：公開の版（PMC）がある論文は、survey でその本文のページも読む
    */
-  scholarly: { queriesMax: 3, perQuery: 5, maxWorks: 12, openAccessPages: 2 },
+  scholarly: {
+    queriesMax: 3,
+    perQuery: 5,
+    maxWorks: 12,
+    /** 公開の版（本文）を読む論文の数（1回の調査）。lookup は答えの1件だけ */
+    openAccessPages: { lookup: 1, survey: 3 },
+    /** 検索で見つけた論文のうち、抄録と公開の版を補う数（1回の調査。API への負荷を抑える） */
+    enrichMax: 4,
+    /** 1つの論文から読みに行く公開の版の候補の数 */
+    relatedMax: 2,
+  },
+  /** PDF の読み取り（設計 v1.5 §8.3.4）。大きさ・ページ数・時間の上限 */
+  pdf: { maxBytes: 10_000_000, maxPages: 60, timeoutMs: 5_000 },
   /**
    * 依頼の種類（設計 v1.3 D9、§8.1.2）。種類から、返す量・取得の範囲・締め切り・続きの有無を決める。
    * startMs は最初の束の締め切り（W-01）
@@ -244,8 +262,9 @@ export function isExcluded(host: string): boolean {
 export type { Tier };
 
 /** 出典の種類（設計 v1.4 D13）。保存せず、出典の種類と URL から決める */
-export function tierOf(source: { kind: string; url: string }): Tier {
-  if (source.kind === "work" || source.kind === "arxiv") return "paper";
+export function tierOf(source: { kind: string; url: string; work?: unknown }): Tier {
+  // 論文の公開の版（PDF・リポジトリ）は、取得先によらず論文（設計 v1.5 §8.3.4）
+  if (source.kind === "work" || source.kind === "arxiv" || source.work) return "paper";
   if (source.kind === "github") return "official";
   let host = "";
   try {
