@@ -874,7 +874,6 @@ export class RunDO extends DurableObject<Env> {
     if (!m) return none({ notices: [{ kind: "run_not_found" }] });
     const pm = m.passageMeta[passageId];
     if (!pm) return none({ notices: [{ kind: "passage_not_found", passageId }] });
-    if (pm.v !== m.version) return none({ notices: [{ kind: "superseded", currentVersion: m.version }] });
     let src = this.sources.get(pm.sourceId);
     if (!src) {
       const r = await this.gw().fetchDoc(pm.url);
@@ -1041,12 +1040,12 @@ export class RunDO extends DurableObject<Env> {
     passageId: string,
   ): Promise<
     | { ok: true; text: string; source: Source; fingerprint: Fingerprint }
-    | { ok: false; reason: "unknown_passage" | "stale_version" | "not_in_source" }
+    | { ok: false; reason: "unknown_passage" | "not_in_source" }
   > {
     const m = this.meta!;
     const hit = this.hits.get(passageId);
+    // 版（steer の前後）は照合に関係しない。照合は、その段落の原文に引用があるかだけを見る（設計 v1.5 §8.3.7）
     if (hit) {
-      if (hit.v !== m.version) return { ok: false, reason: "stale_version" };
       if (hit.status !== "引用確認済" || !hit.verifiedText) return { ok: false, reason: "not_in_source" };
       const source: Source = { kind: hit.record.kind, url: hit.record.url, locator: hit.record.locator };
       if (hit.record.title) source.title = hit.record.title;
@@ -1055,7 +1054,6 @@ export class RunDO extends DurableObject<Env> {
     const para = this.paras.get(passageId);
     const pm = m.passageMeta[passageId];
     if (!para && !pm) return { ok: false, reason: "unknown_passage" };
-    if ((para?.v ?? pm?.v) !== m.version) return { ok: false, reason: "stale_version" };
     // 引用は、引いた段落（切り詰める前の全文）の中でだけ照合する。
     // 同じ文書の別の段落にある文を、見ていない段落の名で通さない
     const s = para ? this.sources.get(para.sourceId) : undefined;

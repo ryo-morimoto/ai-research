@@ -299,12 +299,12 @@ describe("段落の前後（research.around、設計 v1.4 §8.2.5）", () => {
     expect(again.passages[0]!.text).toContain("Kahneman and Klein argue");
   });
 
-  it("知らない段落・古い版の段落は、理由を返す", async () => {
+  it("知らない段落は理由を返す。古い版の段落でも前後は取れる", async () => {
     const { id, stub } = newRun();
     const b = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュ", queries: ["cache"] });
     expect((await stub.around("p999", 1, 1)).notices[0]).toMatchObject({ kind: "passage_not_found" });
     const p = b.passages[0]!;
     await stub.steer({ question: "取得先の制限", queries: ["limits"] });
-    expect((await stub.around(p.passageId, 1, 1)).notices[0]).toMatchObject({ kind: "superseded" });
+    expect((await stub.around(p.passageId, 1, 1)).passages.length).toBeGreaterThan(0);
   });
 });

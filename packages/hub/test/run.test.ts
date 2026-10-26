@@ -62,7 +62,7 @@ describe("調査の実行（RunDO）", () => {
     expect(t.bundles).toBe(2);
   });
 
-  it("INV-10：方向を変えたら、古い版の段落を返さず、古い版の段落での引用は stale_version", async () => {
+  it("INV-10：方向を変えたら、古い版の段落を返さない。古い版の段落でも、原文にある引用は照合できる（設計 v1.5 §8.3.7）", async () => {
     const { id, stub } = newRun();
     const b1 = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュ", queries: ["cache"] });
     const old = passageWith(b1, "前置きが完全に一致")!;
@@ -71,7 +71,7 @@ describe("調査の実行（RunDO）", () => {
     expect(b2.question.version).toBe(2);
     expect(b2.passages.map((p) => p.passageId)).not.toContain(old.passageId);
     const v = await stub.verify([{ text: "x", cite: [{ passageId: old.passageId, quote: "前置きが完全に一致" }] }]);
-    expect(v.statuses[0]).toMatchObject({ status: "照合失敗", reason: "stale_version" });
+    expect(v.statuses[0]).toMatchObject({ status: "引用確認済" });
     await trace(stub);
   });
 
@@ -195,7 +195,7 @@ describe("調査の実行（RunDO）", () => {
     expect(v.statuses[0]!.status).toBe("引用確認済");
   });
 
-  it("退避の後も段落 ID を使い回さない（古い版の ID は stale_version、新しい ID は前と重ならない）", async () => {
+  it("退避の後も段落 ID を使い回さない（古い版の ID も同じ原文で照合でき、新しい ID は前と重ならない）", async () => {
     const { id, stub } = newRun();
     const b1 = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュ", queries: ["cache"] });
     const old = passageWith(b1, "前置きが完全に一致")!;
@@ -204,7 +204,7 @@ describe("調査の実行（RunDO）", () => {
     const oldIds = new Set(b1.passages.map((p) => p.passageId));
     for (const p of b2.passages) expect(oldIds.has(p.passageId), `ID ${p.passageId} を使い回している`).toBe(false);
     const v = await stub.verify([{ text: "x", cite: [{ passageId: old.passageId, quote: "前置きが完全に一致" }] }]);
-    expect(v.statuses[0]).toMatchObject({ status: "照合失敗", reason: "stale_version" });
+    expect(v.statuses[0]).toMatchObject({ status: "引用確認済" });
   });
 
   it("Q-02：台帳の抜き書きを照らし直す（変わっていなければ引用確認済、消えていれば照合失敗）", async () => {

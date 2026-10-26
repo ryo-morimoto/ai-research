@@ -133,7 +133,7 @@ export type ClaimInput = {
 export type ClaimStatus = {
   index: number;
   status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合";
-  reason?: "no_citation" | "unknown_passage" | "not_in_source" | "marker_mismatch" | "near_miss" | "quote_too_long" | "empty_quote" | "stale_version" | "budget";
+  reason?: "no_citation" | "unknown_passage" | "not_in_source" | "marker_mismatch" | "near_miss" | "quote_too_long" | "empty_quote" | "budget";
   nearest?: { text: string; score: number };
   /** 照合失敗・未照合のとき、理由ごとの次の手（設計 v1.5 §8.3.7） */
   next?: string;

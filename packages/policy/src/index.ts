@@ -222,7 +222,6 @@ export const ROUTE_ALLOW_CONTEXT = {
 export const VERIFY_NEXT = {
   no_citation: "主張に cite（段落 ID と、段落の text をそのまま写した引用）を付けて verify する。出典がなければ「背景知識」と書く。",
   unknown_passage: "その段落 ID はこの調査にない。束・around・find で返った passageId を使う。",
-  stale_version: "steer の前の段落。steer の後の束の passageId で引き直す。",
   not_in_source: "引用が段落にない。段落の text からそのまま写す（言い換えない）。",
   marker_mismatch: "数字か否定が原文と違う。nearest の原文どおりに写す。",
   near_miss: "原文と少し違う。nearest を見て、原文どおりに写す。",
