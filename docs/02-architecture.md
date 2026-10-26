@@ -147,7 +147,8 @@ research.start(q: {
 }): Promise<Bundle | HubError>;
 
 research.next(runId, opts?: { waitMs?: number }): Promise<Bundle | HubError>;   // 差分だけ（survey）
-research.around(runId, passageId, opts?: { before?: number; after?: number }): Promise<{ sources; passages: Passage[] } | HubError>;   // 段落の前後（§8.2.5）
+research.around(runId, passageId, opts?: { before?: 0 | 1 | 2 | 3; after?: 0 | 1 | 2 | 3 }): Promise<{ sources; passages: Passage[] } | HubError>;   // 段落の前後（§8.2.5）。超えた値は丸めて clamped（§8.3.7）
+research.find(runId, sourceIdOrUrl, text): Promise<{ sources; passages: Passage[] } | HubError>;   // 取得済みの出典の中を語句で探す（§8.3.3）
 research.verify(runId, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<VerifyResult | HubError>;
 research.steer(runId, q: { question: string; queries?: string[]; urls?: string[]; sources?: ("web" | "scholarly")[] }): Promise<Bundle | HubError>;
 research.deepen(runId): Promise<Bundle | HubError>;   // 利用者が求めたとき（「徹底的に」「網羅的に」を含む。W-04）
@@ -160,21 +161,22 @@ type Source = { kind: "web" | "github" | "arxiv" | "work"; url: string; title?: 
   work?: { authors: string[]; year?: number; venue?: string; doi?: string; pmid?: string; pmcid?: string } };
 type Passage = { passageId: string; sourceId: string; text: string; context?: string };   // context は見出し・導入の文・表の見出し行（照合の対象外）
 type LedgerHit = { passageId: string; sourceId: string; excerpt: string;
-  status: "引用確認済" | "照合中" | "照合失敗" | "取得できず未照合"; verifiedAt: string };
+  status: "引用確認済" | "照合失敗" | "取得できず未照合"; verifiedAt: string };   // 照合中は束に出さない（§8.3.2）
 type Bundle = {
   runId: string; mode: Mode;
-  question: { version: number; text: string };
+  question: { version: number };     // 問いの文は繰り返さない（§8.3.7）
   sources: Record<string, Source>;   // 束に出てくる出典を1回だけ（§8.2.7）
   ledgerHits: LedgerHit[];   // 関連の下限を超えたものだけ。lookup は3件まで
   passages: Passage[];       // lookup は5件まで
-  cutoffs: { what: string; why: string; detail?: string; urls?: string[] }[];   // まとめても URL は残す（Q-04）
+  pending: { what: string; since: string }[];   // まだ集めている（喪失ではない。§8.3.2）
+  cutoffs: { what: string; why: string; detail?: string; urls?: string[]; sourceId?: string }[];   // 確定した喪失だけ。まとめても URL は残す（Q-04）
   progress: { searched: number; found: number; fetched: number; failed: number; running: number };
   done: boolean;             // 作業が尽きたか、4分の上限（D15）
   notices: Notice[];         // { kind: "empty", why, next } など、そのときだけ
 };
 type ClaimStatus = { index: number;
   status: "引用確認済" | "引用確認済（表記差あり）" | "照合失敗" | "未照合";
-  reason?: string; nearest?: { text: string; score: number } };   // 照合失敗のとき、原文でいちばん近い箇所
+  reason?: string; next?: string; nearest?: { text: string; score: number } };   // 照合失敗のとき、理由ごとの次の手と、原文でいちばん近い箇所
 type HubError = { error: { code: "busy" | "run_not_found" | "bad_input" | "internal"; retryable: boolean; message: string; next: string; runId?: string } };
 ```
 
