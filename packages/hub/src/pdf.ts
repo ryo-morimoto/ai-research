@@ -26,8 +26,14 @@ export async function pdfBlocks(bytes: Uint8Array, opts: { maxPages: number; tim
   }
 }
 
+/**
+ * 標準14フォントのデータの置き場（issue 007：未指定だと UnknownErrorException の warn が出る）。
+ * フォントは字形の計量にだけ使われ、本文の抽出には必須でない。版は固定し、取れなくても抽出は続く
+ */
+const STANDARD_FONT_DATA_URL = "https://unpkg.com/pdfjs-dist@4.10.38/standard_fonts/";
+
 async function read(bytes: Uint8Array, maxPages: number): Promise<PdfResult> {
-  const pdf = await getDocumentProxy(bytes);
+  const pdf = await getDocumentProxy(bytes, { standardFontDataUrl: STANDARD_FONT_DATA_URL });
   const pages = pdf.numPages;
   const readPages = Math.min(pages, maxPages);
   const blocks: Block[] = [];

@@ -1,7 +1,7 @@
 ---
 id: 7
 title: PDF 解析の警告(pdf.js)
-status: open
+status: in-progress
 priority: low
 area: hub/pdf
 kind: noise
@@ -33,3 +33,7 @@ created: 2026-10-29
 
 - `pdf.ts` で `standardFontDataUrl` を指定する(これは設定不足と確認済みで、設定で解消できる)。
 - 残りは壊れた・珍しい PDF への警告で抽出は続いている。実害(本文が取れなかったか)が出たときに個別に見る。
+
+## 対応（2026-10-30、docs/06 の設計に基づく実装）
+
+`pdf.ts` で `standardFontDataUrl` を指定（版固定の CDN）。残りの警告は対処しない。

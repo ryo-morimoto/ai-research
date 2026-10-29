@@ -166,5 +166,12 @@ export async function handleMcp(request: Request, env: Env, opts: { executor?: E
   const server = buildServer(env, opts);
   const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
   await server.connect(transport);
-  return transport.handleRequest(request);
+  const res = await transport.handleRequest(request);
+  // 4xx の理由を1行残す（issue 003：POST /mcp の 400 が理由なしで積もっていた）。
+  // Dynamic Worker 側のイベントは観測に乗らないので、ハブのこの1箇所で捕まえる
+  if (res.status >= 400 && res.status < 500) {
+    const reason = await res.clone().text().catch(() => "");
+    emit({ event: "bad_request", path: new URL(request.url).pathname, status: res.status, reason: reason.slice(0, 300) });
+  }
+  return res;
 }

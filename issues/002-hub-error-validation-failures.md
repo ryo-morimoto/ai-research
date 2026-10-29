@@ -1,7 +1,7 @@
 ---
 id: 2
 title: 境界のバリデーション失敗(hub_error)が頻発している
-status: open
+status: in-progress
 priority: high
 area: hub/boundary
 kind: ux
@@ -37,3 +37,7 @@ created: 2026-10-29
 ## 次の一手
 
 `boundary.ts` を読んで、clamp より先に Zod が弾いているかを確かめる。合わせて、失敗した呼び出しの実引数(どんな値を渡していたか)をログに残せるか確認する。
+
+## 対応（2026-10-30、docs/06 の設計に基づく実装）
+
+境界を clamp + clamped notice に一般化（waitMs・maxPassages・queries/urls/exclusions・find.limit・claims。docs/06 R2）。型定義に上限を明記し、bad_input は実引数の形をログに残す。再観測で件数の減少を確認する。
