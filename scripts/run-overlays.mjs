@@ -38,7 +38,7 @@ function resolveShim() {
 const shim = resolveShim();
 
 const adapter = readFileSync(join(root, "spec/Adapter.pkl"), "utf8");
-const suites = { hub: { dir: "packages/hub", keys: [], discoverable: true }, core: { dir: "packages/core", keys: [], discoverable: false } };
+const suites = { hub: { dir: "packages/hub", keys: [], discoverable: true }, core: { dir: "packages/core", keys: [], discoverable: true } };
 let current = null;
 for (const line of adapter.split("\n")) {
   const name = line.match(/name = "(\w+)"/);

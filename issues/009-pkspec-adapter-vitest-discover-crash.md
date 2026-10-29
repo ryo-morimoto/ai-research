@@ -3,9 +3,9 @@ id: 9
 title: pkspec-adapter-vitest の discover が core パッケージでコアダンプする（上流の不具合）
 status: open
 priority: low
-area: spec/pkspec-trial
+area: spec
 kind: bug
-cause_confirmed: false
+cause_confirmed: true
 count: 1
 period_days: 1
 source: spec/pkspec-trial の M1 試験（2026-10-30）
@@ -28,15 +28,31 @@ created: 2026-10-30
   - packages/core：**決定的に再現**（2回とも exit 134 = SIGABRT、出力 0 バイト）
   - packages/hub（workerd プール）・packages/view（素の vitest、同じモノレポ・同じ vitest 版）：成功
   - `vitest list` 自体は core で成功する → 落ちているのは vitest ではなく**シム（MoonBit バイナリ）の discover 処理**
-- 確度 中（更新後）：core のテスト収集の出力・内容の何か（候補：fast-check を import する5ファイル、
-  テスト名に含まれる記号 ≤・×・=== など）をシムが処理するところで abort する。
-  反証するには、core のテストファイルを1つずつ含めて discover を回し、落ちる最小の組を見つける。
+- **原因を最小再現で確定（2026-10-30、bisect 10 回）**。次の 11 行のファイルが単独で決定的に SIGABRT：
+
+  ```ts
+  import { describe, expect, it } from "vitest";
+  import fc from "fast-check";
+  import { ... } from "../src/index.ts";
+  describe("記録の整形（例）", () => {
+    const base = { runId: "run_1", at: 1, ev: 1, v: 1 };
+    it("サロゲートの組を割らずに切る", () => {
+      expect(clipChars("😀😀😀", 2)).toBe("😀😀");
+    });
+  });
+  ```
+
+  切り分けの結果：`import fc from "fast-check"`（**未使用**）を消すと成功。`void fc` で使うと成功。
+  生のサロゲートペアのリテラル単体・describe 単体・src import 単体・日本語名単体はどれも成功。
+  → 未使用の fast-check import と、describe 内の生のサロゲートリテラルの**組み合わせ**でシムが abort する
+  （esbuild/strip の変換経路の差と推測。シム内部の MoonBit 文字列処理が候補）。
 - drift 分類は `harness-drift`（検査の道具の側の不具合）。検査の性質は変えない。
 
 ## 次の一手
 
-- core のテストファイルを1つずつ含めた切り分けで最小再現を絞り、上流（mizchi/pkspec）に報告する
-  （**外部への報告は利用者の了承を得てから**。切り分けデータは上の観測のとおり揃っている）。
-- 影響：pkspec は唯一の正の検査器になった（adr/0001 の利用者決定 2026-10-30）が、落ちるのは
-  adapter シムの discover だけで、check・exec・spec・coverage と run は動く。overlay の実行
-  （scripts/run-overlays.mjs）では core の discover 照合を省略して run で検証している。
+- **リポジトリ側は回避済み（2026-10-30）**：core/test/trace.test.ts の絵文字リテラルをエスケープ表記
+  （`"\u{1F600}"`）に変えた（検査の意味は同じ）。これで core の discover が通り、
+  `pkspec adapter --dry-run` が本体 CLI で全スイート解決（lint:constraints に組み込み済み）。
+  scripts/run-overlays.mjs も core の discover 照合を復活させた。
+- 残るのは上流（mizchi/pkspec）への報告だけ。上の最小再現をそのまま貼れる
+  （**外部への報告は利用者の了承を得てから**）。

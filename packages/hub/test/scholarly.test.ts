@@ -11,6 +11,17 @@ const newRun = () => {
   return { id, stub: run(id) };
 };
 
+/**
+ * 多段の取得（書誌→抄録→公開の版）を踏む試験は、全体の短縮スケール（0.02）だと負荷で
+ * 締め切りに入らないことがある（issues/010）。その試験だけ余裕のあるスケールにする
+ */
+async function slowScale(stub: ReturnType<typeof run>) {
+  await runInDurableObject(stub, (inst: unknown) => {
+    const self = inst as unknown as { env: Record<string, unknown> };
+    self.env = { ...self.env, TEST_TIME_SCALE: "0.2" };
+  });
+}
+
 describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () => {
   it("URL から DOI を取り出す（出版社の URL の飾りを外す）", () => {
     expect(doiOf("https://psycnet.apa.org/doi/10.1037/0033-2909.119.2.254")).toBe("10.1037/0033-2909.119.2.254");
@@ -43,12 +54,20 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
 
   it("sources に scholarly を渡すと、論文の書誌と抄録が段落になる。照合すると論文として台帳に入る。公開の版のページも読む", async () => {
     const { id, stub } = newRun();
+    await slowScale(stub);
     const b = await stub.start(id, { mode: "survey", question: "Gollwitzer の熟慮マインドセットと実行マインドセット", sources: ["scholarly"], queries: ["deliberative implemental mindset Gollwitzer"] });
-    const last = b.done ? b : await stub.next(50_000);
-    const all = [...b.passages, ...last.passages];
+    // done まで集めてから確かめる（遅い分は続きで届く。issues/010）
+    let cur = b;
+    const all = [...b.passages];
+    const srcs = { ...b.sources };
+    while (!cur.done) {
+      cur = await stub.next(50_000);
+      all.push(...cur.passages);
+      Object.assign(srcs, cur.sources);
+    }
     const abs = all.find((p) => p.text.includes("open-minded processing"))!;
     expect(abs).toBeDefined();
-    expect({ ...b.sources, ...last.sources }[abs.sourceId]).toMatchObject({ kind: "work", tier: "paper", url: "https://doi.org/10.1007/s11031-022-09977-8", work: { year: 2022, venue: "Motivation and Emotion" } });
+    expect(srcs[abs.sourceId]).toMatchObject({ kind: "work", tier: "paper", url: "https://doi.org/10.1007/s11031-022-09977-8", work: { year: 2022, venue: "Motivation and Emotion" } });
     expect(abs.context).toBe("Abstract");
     // 書誌の1行は、同じ論文の抄録より下に並ぶ
     const ids = all.map((p) => p.passageId);
@@ -70,6 +89,7 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
 
   it("出版社のページが拒んでも、URL の DOI から書誌と抄録に取り直す。ページは経路外で読める", async () => {
     const { id, stub } = newRun();
+    await slowScale(stub);
     const url = "https://psycnet.apa.org/doi/10.1037/0033-2909.119.2.254";
     const b = await stub.start(id, { mode: "lookup", question: "Kluger DeNisi feedback interventions performance d", urls: [url] });
     const p = b.passages.find((x) => x.text.includes("d = .41"))!;
@@ -85,6 +105,7 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
 
   it("DOI で引いた論文は公開の版（PDF）も読む。本文は論文の書誌つき・種類 paper の出典になる。連絡先とキーは決めた API にだけ送る", async () => {
     const { id, stub } = newRun();
+    await slowScale(stub);
     const b = await stub.start(id, { mode: "lookup", question: "intuitive expertise environment sufficiently regular opportunity to learn", urls: ["https://doi.org/10.1037/0033-2909.119.2.254"] });
     const last = b.done ? b : await stub.next(50_000);
     const all = [...b.passages, ...last.passages];
@@ -105,6 +126,7 @@ describe("論文の書誌と抄録（設計 v1.4 §8.2.2、制約 Q-08）", () =
 
   it("Europe PMC にも Crossref にも抄録がなければ OpenAlex の抄録を使う（Semantic Scholar より先）", async () => {
     const { id, stub } = newRun();
+    await slowScale(stub);
     const b = await stub.start(id, { mode: "lookup", question: "Asch impressions of personality formed as a whole", urls: ["https://doi.org/10.1037/h0055756"] });
     const p = b.passages.find((x) => x.context === "Abstract")!;
     expect(p.text).toBe("Impressions of personality are formed as a whole");

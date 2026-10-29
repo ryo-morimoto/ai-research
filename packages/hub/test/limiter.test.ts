@@ -69,12 +69,15 @@ describe("頻度制限（HostLimiterDO）", () => {
     const host = "lost.example.com";
     const policy = { pattern: host, minIntervalMs: 0, maxConcurrent: 1 };
     const stub = limiter(host);
-    const a = await stub.acquire(policy, 1_000); // 返さない
+    // TTL は実時間で十分な余裕を取る（短縮スケールで 20ms だと、負荷で2回目の acquire の前に
+    // 期限が切れて granted になってしまう。issues/010）
+    const ttl = 30_000;
+    const a = await stub.acquire(policy, ttl); // 返さない
     expect(a.granted).toBe(true);
-    const b = await stub.acquire(policy, 1_000);
+    const b = await stub.acquire(policy, ttl);
     expect(b.granted).toBe(false);
-    await sleep(1_000 * scale + 20);
-    const c = await stub.acquire(policy, 1_000);
+    await sleep(ttl * scale + 50);
+    const c = await stub.acquire(policy, ttl);
     expect(c.granted).toBe(true);
   });
 

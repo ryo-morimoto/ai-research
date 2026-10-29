@@ -68,6 +68,21 @@ const exec = pkspec(["exec", "-f", "Test.pkl"]);
 if (exec.status !== 0) errors.push(`pkspec exec（実装ポインタの空振り）:\n${exec.out.trim().split("\n").slice(-12).join("\n")}`);
 else console.log(`ok   pkspec exec: ${exec.out.trim().split("\n").at(-1)}`);
 
+// adapter（vitest への overlay）を本体 CLI で解決する。--dry-run は discover と overlay の照合だけで、
+// テストの実行はしない（実行は pnpm test と scripts/run-overlays.mjs）
+{
+  const binDir = join(bin, "..");
+  const r = spawnSync(bin, ["adapter", "-f", "Adapter.pkl", "--dry-run"], {
+    cwd: specDir,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+  });
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  if ((r.status ?? 1) !== 0) errors.push(`pkspec adapter --dry-run（vitest overlay の解決）:\n${out.trim().split("\n").slice(-8).join("\n")}`);
+  else console.log(`ok   pkspec adapter --dry-run: suites ${(out.match(/adapter suite /g) ?? []).length}、cases ${(out.match(/::/g) ?? []).length}`);
+}
+
 // ---- 孤児の検出（台帳にない ID がテスト・仕様に現れていないか） -----------------
 
 const specText = readFileSync(join(specDir, "Spec.pkl"), "utf8");

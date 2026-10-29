@@ -110,7 +110,10 @@ describe("記録の整形（例）", () => {
   });
 
   it("サロゲートの組を割らずに切る", () => {
-    expect(clipChars("😀😀😀", 2)).toBe("😀😀");
+    // 絵文字はエスケープ表記で書く：生のサロゲートペアのリテラルがこのファイルにあると、
+    // pkspec-adapter-vitest の discover が SIGABRT で落ちる（上流の不具合。issues/009 の最小再現）
+    const face = "\u{1F600}";
+    expect(clipChars(face.repeat(3), 2)).toBe(face.repeat(2));
   });
 
   it("ホスト名は小文字。URL でなければ undefined", () => {

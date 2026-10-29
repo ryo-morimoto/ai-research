@@ -10,7 +10,8 @@
   - `spec/constraints.ts`・自作の照合ロジック・併走用の生成スクリプトは削除。`scripts/check-constraints.mjs` は pkspec の実行役（check＋exec＋孤児検出＋ビュー生成）に書き換え、**pkspec を必須の検査器**にした。公式 tarball（sha256 つき）を `tools/pkspec/` に vendoring し、PATH にないときは照合して自動展開するので、**素の環境でも `pnpm check` が通る**（linux-amd64。他は PATH / PKSPEC_BIN）。
   - 移行時の全件実測：`pkspec check` 72 件 green、`pkspec exec` 72/72 passed、孤児 0。overlay は `scripts/run-overlays.mjs` が discover の実 ID と照合して実行し 4/4 passed（core の discover は issues/009 の上流不具合のため run のみ）。
   - 試験ディレクトリ spec/pkspec-trial は役目を終えて削除（利用者の指示）。M1 の証跡はこの節と git 履歴（コミット e63982e〜a7bb5ea）にある。
-  - 残る依存：pkspec は experimental（v0.4.2）。CLI の変動と issues/009 は上流に追随する。PATH への導入（chezmoi）は任意になった：リポジトリの vendoring が既定で効く（~/.local/bin への配置はエージェント権限で不可だったため、この形にした）。
+  - 残る依存：pkspec は experimental（v0.4.2）。PATH への導入（chezmoi）は任意：リポジトリの vendoring が既定で効く。
+  - **追補（2026-10-30）**：discover クラッシュ（issues/009）は bisect で原因を確定（未使用の fast-check import ＋ describe 内の生サロゲートリテラルの組）し、リテラルをエスケープ表記に変えて回避した。これで **`pkspec adapter --dry-run` が本体 CLI で通り、lint:constraints に組み込んだ**（vitest overlay の解決も CI の一部）。時間依存テストの flake は issues/010 のとおり全箇所を直し、連続 10 回 green を確認。残るのは issues/009 の上流報告（利用者の了承待ち）のみ。
 - **M2（済）**：`spec/constraints.ts`（Goal 9 件・制約 72 件）＋ `scripts/check-constraints.mjs`。検査の内容：承認済みの MUST に機械検査（ID の grep かファイルの実在）があるか／宣言した grep の空振り／孤児の ID／`docs/generated/` のビューが台帳と一致するか。`pnpm check` に `lint:constraints` と `spec:check` を組み込んだ。CI で判定できない運用系の MUST（P-03・Q-05 など）は `verifiedOutsideRepo` として coverage に列挙する（draft への偽装をしないため）。
 - **M3（済）**：docs を再編した。旧 01・02・03・05 は `docs/adr/archive/` に凍結（コードコメントの「docs/02 §8.3.2」はそこを指す）。現在形の設計は `docs/design/`、目的と緊張関係は `docs/product.md`、運用は `docs/runbook.md`、地図は `docs/README.md`。旧 docs/01 §2・docs/05 §2 の制約表と docs/03 §3.5〜3.6 の対応表は削除し、生成物（`docs/generated/`）に置き換えた。
 - **P3・P4 相当（済、2026-10-29 同日）**：
