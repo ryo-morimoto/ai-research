@@ -1,0 +1,367 @@
+// 実装ポインタ：各制約の検査（vitest の ID タグ・Quint・スクリプト・ファイル）が実在することを確かめる。
+// ops（運用で確かめる）の制約は、ビュー（docs/generated/SPEC.md）に列挙されていることだけを確かめる。
+// vitest のテストそのものへの接続は Adapter.pkl の overlays
+amends "./pkl/Test.pkl"
+
+tests {
+  new {
+    name = "W-01 の検査が実在する"
+    specRef { "W-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'W-01' packages/*/test" }
+  }
+  new {
+    name = "W-02 の検査が実在する"
+    specRef { "W-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'W-02' specs && grep -rq 'W-02' packages/*/test" }
+  }
+  new {
+    name = "W-03 の検査が実在する"
+    specRef { "W-03" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'W-03' packages/*/test" }
+  }
+  new {
+    name = "W-04 の検査が実在する"
+    specRef { "W-04" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'W-04' packages/*/test && grep -rq 'W-04' specs" }
+  }
+  new {
+    name = "S-01 の検査が実在する"
+    specRef { "S-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'S-01' packages/*/test" }
+  }
+  new {
+    name = "S-02 の検査が実在する"
+    specRef { "S-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'S-02' packages/*/test" }
+  }
+  new {
+    name = "S-03 の検査が実在する"
+    specRef { "S-03" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'S-03' packages/*/test" }
+  }
+  new {
+    name = "S-04 の検査が実在する"
+    specRef { "S-04" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'S-04' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "S-05 の検査が実在する"
+    specRef { "S-05" }
+    body = new CmdTest { cmd = "cd .. && test -e 'bench/run_cases.py'" }
+  }
+  new {
+    name = "S-06 の検査が実在する"
+    specRef { "S-06" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'S-06' packages/*/test && grep -rq 'S-06' scripts" }
+  }
+  new {
+    name = "P-01 の検査が実在する"
+    specRef { "P-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'P-01' packages/*/test && test -e 'specs/run.qnt'" }
+  }
+  new {
+    name = "P-02 の検査が実在する"
+    specRef { "P-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'P-02' packages/*/test" }
+  }
+  new {
+    name = "P-03 の検査が実在する"
+    specRef { "P-03" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'P-03' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "P-04 の検査が実在する"
+    specRef { "P-04" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'P-04' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "P-05 の検査が実在する"
+    specRef { "P-05" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'P-05' packages/*/test" }
+  }
+  new {
+    name = "P-06 の検査が実在する"
+    specRef { "P-06" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'P-06' packages/*/test" }
+  }
+  new {
+    name = "P-07 の検査が実在する"
+    specRef { "P-07" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'P-07' packages/*/test" }
+  }
+  new {
+    name = "Q-01 の検査が実在する"
+    specRef { "Q-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'Q-01' packages/*/test && grep -rq 'Q-01' scripts" }
+  }
+  new {
+    name = "Q-02 の検査が実在する"
+    specRef { "Q-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'Q-02' packages/*/test && grep -rq 'Q-02' specs" }
+  }
+  new {
+    name = "Q-03 の検査が実在する"
+    specRef { "Q-03" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'Q-03' scripts && test -e 'specs/ledger.qnt'" }
+  }
+  new {
+    name = "Q-04 の検査が実在する"
+    specRef { "Q-04" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'Q-04' packages/*/test" }
+  }
+  new {
+    name = "Q-05 の検査が実在する"
+    specRef { "Q-05" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'Q-05' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "Q-06 の検査が実在する"
+    specRef { "Q-06" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'Q-06' packages/*/test" }
+  }
+  new {
+    name = "Q-07 の検査が実在する"
+    specRef { "Q-07" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'Q-07' packages/*/test" }
+  }
+  new {
+    name = "Q-08 の検査が実在する"
+    specRef { "Q-08" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'Q-08' packages/*/test" }
+  }
+  new {
+    name = "U-01 の検査が実在する"
+    specRef { "U-01" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'U-01' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "U-02 の検査が実在する"
+    specRef { "U-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'U-02' specs && grep -rq 'U-02' packages/*/test" }
+  }
+  new {
+    name = "U-03 の検査が実在する"
+    specRef { "U-03" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'U-03' packages/*/test" }
+  }
+  new {
+    name = "U-04 の検査が実在する"
+    specRef { "U-04" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'U-04' packages/*/test" }
+  }
+  new {
+    name = "U-05 の検査が実在する"
+    specRef { "U-05" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'U-05' packages/*/test && grep -rq 'U-05' scripts" }
+  }
+  new {
+    name = "E-01 の検査が実在する"
+    specRef { "E-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'E-01' packages/*/test" }
+  }
+  new {
+    name = "E-02 の検査が実在する"
+    specRef { "E-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'E-02' packages/*/test && grep -rq 'E-02' specs" }
+  }
+  new {
+    name = "E-03 の検査が実在する"
+    specRef { "E-03" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'E-03' packages/*/test" }
+  }
+  new {
+    name = "E-04 の検査が実在する"
+    specRef { "E-04" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'E-04' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "E-05 の検査が実在する"
+    specRef { "E-05" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'E-05' scripts && test -e 'plugins/ai-research/README.md'" }
+  }
+  new {
+    name = "R-01 の検査が実在する"
+    specRef { "R-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'R-01' specs && grep -rq 'R-01' packages/*/test" }
+  }
+  new {
+    name = "R-02 の検査が実在する"
+    specRef { "R-02" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'R-02' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "V-01 の検査が実在する"
+    specRef { "V-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'V-01' packages/*/test && grep -rq 'V-01' scripts" }
+  }
+  new {
+    name = "V-02 の検査が実在する"
+    specRef { "V-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'V-02' packages/*/test" }
+  }
+  new {
+    name = "V-03 の検査が実在する"
+    specRef { "V-03" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'V-03' packages/*/test" }
+  }
+  new {
+    name = "V-04 の検査が実在する"
+    specRef { "V-04" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'V-04' packages/*/test" }
+  }
+  new {
+    name = "V-05 の検査が実在する"
+    specRef { "V-05" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'V-05' packages/*/test" }
+  }
+  new {
+    name = "V-06 の検査が実在する"
+    specRef { "V-06" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'V-06' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "V-07 の検査が実在する"
+    specRef { "V-07" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'V-07' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "V-08 の検査が実在する"
+    specRef { "V-08" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'V-08' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "V-09 の検査が実在する"
+    specRef { "V-09" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'V-09' packages/*/test" }
+  }
+  new {
+    name = "V-10 の検査が実在する"
+    specRef { "V-10" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'V-10' packages/*/test" }
+  }
+  new {
+    name = "C-01 の検査が実在する"
+    specRef { "C-01" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-01' packages/*/test" }
+  }
+  new {
+    name = "C-02 の検査が実在する"
+    specRef { "C-02" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-02' packages/*/test" }
+  }
+  new {
+    name = "C-03 の検査が実在する"
+    specRef { "C-03" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-03' packages/*/test" }
+  }
+  new {
+    name = "C-04 の検査が実在する"
+    specRef { "C-04" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-04' packages/*/test" }
+  }
+  new {
+    name = "C-05 の検査が実在する"
+    specRef { "C-05" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-05' packages/*/test" }
+  }
+  new {
+    name = "C-06 の検査が実在する"
+    specRef { "C-06" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-06' packages/*/test" }
+  }
+  new {
+    name = "C-07 の検査が実在する"
+    specRef { "C-07" }
+    body = new CmdTest { cmd = "cd .. && grep -q 'C-07' docs/generated/SPEC.md" }
+  }
+  new {
+    name = "C-08 の検査が実在する"
+    specRef { "C-08" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-08' packages/*/test" }
+  }
+  new {
+    name = "C-09 の検査が実在する"
+    specRef { "C-09" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-09' packages/*/test" }
+  }
+  new {
+    name = "C-10 の検査が実在する"
+    specRef { "C-10" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-10' packages/*/test" }
+  }
+  new {
+    name = "C-11 の検査が実在する"
+    specRef { "C-11" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'C-11' packages/*/test" }
+  }
+  new {
+    name = "INV-1 の検査が実在する"
+    specRef { "INV-1" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-1' specs && grep -rq 'INV-1' packages/*/test && grep -rq 'INV-1' scripts" }
+  }
+  new {
+    name = "INV-2 の検査が実在する"
+    specRef { "INV-2" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-2' specs && grep -rq 'INV-2' packages/*/test" }
+  }
+  new {
+    name = "INV-3 の検査が実在する"
+    specRef { "INV-3" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-3' specs && grep -rq 'INV-3' packages/*/test" }
+  }
+  new {
+    name = "INV-4 の検査が実在する"
+    specRef { "INV-4" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-4' specs && grep -rq 'INV-4' packages/*/test" }
+  }
+  new {
+    name = "INV-5 の検査が実在する"
+    specRef { "INV-5" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-5' specs && grep -rq 'INV-5' packages/*/test" }
+  }
+  new {
+    name = "INV-6 の検査が実在する"
+    specRef { "INV-6" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-6' specs && grep -rq 'INV-6' packages/*/test" }
+  }
+  new {
+    name = "INV-7 の検査が実在する"
+    specRef { "INV-7" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-7' specs && grep -rq 'INV-7' packages/*/test" }
+  }
+  new {
+    name = "INV-8 の検査が実在する"
+    specRef { "INV-8" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-8' specs && grep -rq 'INV-8' packages/*/test" }
+  }
+  new {
+    name = "INV-9 の検査が実在する"
+    specRef { "INV-9" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-9' specs && grep -rq 'INV-9' packages/*/test" }
+  }
+  new {
+    name = "INV-10 の検査が実在する"
+    specRef { "INV-10" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-10' specs && grep -rq 'INV-10' packages/*/test" }
+  }
+  new {
+    name = "INV-11 の検査が実在する"
+    specRef { "INV-11" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-11' specs && grep -rq 'INV-11' packages/*/test" }
+  }
+  new {
+    name = "INV-12 の検査が実在する"
+    specRef { "INV-12" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-12' packages/*/test" }
+  }
+  new {
+    name = "INV-13 の検査が実在する"
+    specRef { "INV-13" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-13' packages/*/test" }
+  }
+  new {
+    name = "INV-14 の検査が実在する"
+    specRef { "INV-14" }
+    body = new CmdTest { cmd = "cd .. && grep -rq 'INV-14' packages/*/test" }
+  }
+}

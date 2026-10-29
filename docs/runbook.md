@@ -200,7 +200,9 @@ Instructions for Claude に足す1行：
 
 | 何を | コマンド | 中身 |
 |---|---|---|
-| 全部（CI と同じ） | `pnpm check` | 依存の規則、型、core の単体・性質ベーステスト、hub の結合試験（workerd の上で、偽の取得先に対して） |
+| 全部（CI と同じ） | `pnpm check` | 依存の規則、説明の大きさとラベル、**制約の台帳（spec/Spec.pkl）の pkspec 照合とビュー生成の一致**、Quint、型、core の単体・性質ベーステスト、hub の結合試験。**pkspec が PATH（か PKSPEC_BIN）に要る**（[mizchi/pkspec](https://github.com/mizchi/pkspec) の install.sh。導入は chezmoi に入れる） |
+| 制約の編集後 | `pnpm constraints:write` | spec/Spec.pkl・Test.pkl から docs/generated/ を生成し直す |
+| overlay（vitest 接続）の照合と実行 | `node scripts/run-overlays.mjs` | spec/Adapter.pkl の鍵を discover の実 ID と照合し、シムで実行する |
 | 性質ベーステストを多く | `FC_RUNS=20000 pnpm --filter @ai-research/core test` | 失敗したら出力の seed を `FC_SEED` に入れて再現する |
 | 形式仕様（速い） | `pnpm spec:check` | Quint のシミュレーション。正しい版は通り、わざと壊した版は違反が見つかること |
 | 形式仕様（重い） | `SPEC_MODE=full pnpm spec:check` | Apalache による上限付きのモデル検査を加える。Java 17 以上が要る |

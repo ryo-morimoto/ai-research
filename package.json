@@ -11,8 +11,8 @@
     "test": "pnpm -r --if-present test",
     "lint:deps": "node scripts/check-deps.mjs",
     "spec:check": "node scripts/check-specs.mjs",
-    "lint:constraints": "node --experimental-strip-types --no-warnings scripts/check-constraints.mjs --check",
-    "constraints:write": "node --experimental-strip-types --no-warnings scripts/check-constraints.mjs --write",
+    "lint:constraints": "node scripts/check-constraints.mjs --check",
+    "constraints:write": "node scripts/check-constraints.mjs --write",
     "check": "pnpm lint:deps && pnpm lint:budget && pnpm lint:constraints && pnpm spec:check && pnpm typecheck && pnpm test",
     "lint:budget": "node --experimental-strip-types --no-warnings scripts/check-budget.mjs"
   },

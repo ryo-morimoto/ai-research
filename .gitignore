@@ -12,3 +12,4 @@ bench/results/
 .secrets.env
 *.secrets.env
 __pycache__/
+spec/.pkspec/

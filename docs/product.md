@@ -1,6 +1,6 @@
 # ai-research：何のためのシステムか
 
-（旧 docs/01 §0・§1・§4 の現在形。制約の一覧は spec/constraints.ts が正で、docs/generated/SPEC.md に生成される。改訂の経緯は adr/archive/01 の冒頭にある）
+（旧 docs/01 §0・§1・§4 の現在形。制約の一覧は spec/Spec.pkl が正で、docs/generated/SPEC.md に生成される。改訂の経緯は adr/archive/01 の冒頭にある）
 
 ## やりたいこと
 

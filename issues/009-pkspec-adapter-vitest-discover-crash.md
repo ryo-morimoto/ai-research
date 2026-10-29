@@ -30,5 +30,6 @@ created: 2026-10-30
 ## 次の一手
 
 - 最小再現を作り、再現したら上流（mizchi/pkspec）に報告する（**外部への報告は利用者の了承を得てから**）。
-- 当面の影響はない：pkspec は試験導入のみで、正は spec/constraints.ts ＋ scripts/check-constraints.mjs
-  （adr/0001 の決定 2026-10-30）。再評価の条件は spec/pkspec-trial/README.md。
+- 影響：pkspec は唯一の正の検査器になった（adr/0001 の利用者決定 2026-10-30）が、落ちるのは
+  adapter シムの discover だけで、check・exec・spec・coverage と run は動く。overlay の実行
+  （scripts/run-overlays.mjs）では core の discover 照合を省略して run で検証している。

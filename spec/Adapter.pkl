@@ -3,7 +3,8 @@ amends "./pkl/Adapter.pkl"
 import "./pkl/adapters/Vitest.pkl" as Vitest
 
 // vitest への接続（overlay）：既存のテストケースに specRef を付ける。
-// ケースの鍵は「ファイル::テスト名」
+// 鍵は「ファイル::テスト名」で、pkspec-adapter-vitest discover の実 ID と一致していること。
+// 実行は scripts/run-overlays.mjs（pkspec@0.4.2 の本体 CLI に adapter 実行がないため、シムを呼ぶ）
 
 local class HubVitest extends Vitest.Vitest {
   configPath = "packages/hub/vitest.config.ts"
@@ -19,7 +20,7 @@ suites {
   new {
     name = "hub"
     adapter = new HubVitest {}
-    workdir = "../../packages/hub"
+    workdir = "../packages/hub"
     overlays {
       ["test/run.test.ts::W-01・P-01：締め切りまでに最初の束を返す（遅い取得が提示を止めない）。拒まれた取得は打ち切りとして見える"] = new CaseOverlay {
         specRef { "W-01" }
@@ -35,7 +36,7 @@ suites {
   new {
     name = "core"
     adapter = new CoreVitest {}
-    workdir = "../../packages/core"
+    workdir = "../packages/core"
     overlays {
       ["test/properties.test.ts::N(原文) の部分文字列は exact"] = new CaseOverlay {
         specRef { "Q-01" }

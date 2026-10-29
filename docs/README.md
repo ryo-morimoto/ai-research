@@ -4,7 +4,7 @@
 
 | 区分 | 場所 | 中身 | 変更のしかた |
 |---|---|---|---|
-| **正**（機械可読） | `spec/constraints.ts` | 目的（Goal）と全制約（ID・強さ・1行の要件文・検査への参照） | 編集したら `pnpm constraints:write`。整合は `pnpm check` が検査 |
+| **正**（機械可読） | `spec/Spec.pkl` | 目的（Goal）と全制約（ID・強さ＝tags・1行の要件文）。実装ポインタは `spec/Test.pkl`、vitest への接続は `spec/Adapter.pkl` | 編集したら `pnpm constraints:write`。整合は `pnpm check`（検査器は **pkspec**。PATH か PKSPEC_BIN に必須） |
 | 〃 | `packages/policy/` | 実行時の値の正（上限・締め切り・取得先の制限・説明文） | 変えたら revision を上げる（procedureVersion が変わる） |
 | 〃 | `specs/*.qnt` | 形式仕様（Quint）＋わざと壊した変種 | `pnpm spec:check` |
 | **注釈**（人向け・散文） | `docs/product.md` | 目的・成功の物差し・範囲・制約どうしの緊張関係 | ふつうに編集 |
@@ -38,7 +38,7 @@ ID は歴史的に安定しており、改名しない。接頭辞の意味：
 | V- / C- | 調査の記録（見える化）の要件 / 制約 | V-01、C-04 |
 | INV- | 設計の不変条件（Quint・結合試験で守る） | INV-8 |
 
-各 ID の本文・強さ・検査は `spec/constraints.ts` が正。コードやテストの中の `[C-01]` のような表記は、この ID への参照であり、`pnpm lint:constraints` が台帳と突き合わせる（台帳にない ID は「孤児」として落ちる）。
+各 ID の本文・強さ・検査は `spec/Spec.pkl` が正（利用者の決定 2026-10-30：pkspec を唯一の正とし、二重管理を排した。adr/0001）。コードやテストの中の `[C-01]` のような表記はこの ID への参照で、`pnpm lint:constraints` が pkspec の check / exec と孤児検出で台帳と突き合わせる。tags の `ops` は、CI では判定できず運用（点検・実機・計測）で確かめるもの。
 
 ## 旧文書との対応
 
@@ -46,8 +46,8 @@ docs/01〜05 の番号付き文書は 2026-10-29 に再編した（adr/0001）�
 
 | 旧 | 行き先 |
 |---|---|
-| 01 要件と制約 | §0・§1・§4 → product.md、§2 の表 → spec/constraints.ts（+ generated/SPEC.md）、§3・§5・別紙 → archive |
+| 01 要件と制約 | §0・§1・§4 → product.md、§2 の表 → spec/Spec.pkl（+ generated/SPEC.md）、§3・§5・別紙 → archive |
 | 02 アーキテクチャ | 現在形の設計 → design/、§8.1〜8.4 の経緯と計測 → archive |
-| 03 詳細設計と検証 | 不変条件 → spec/constraints.ts、検証の対応表 → generated/、本文 → design/ と archive |
+| 03 詳細設計と検証 | 不変条件 → spec/Spec.pkl、検証の対応表 → generated/、本文 → design/ と archive |
 | 04 デプロイと運用 | runbook.md |
-| 05 記録と見える化 | V-/C- → spec/constraints.ts、設計 → design/trace-view.md、本文 → archive |
+| 05 記録と見える化 | V-/C- → spec/Spec.pkl、設計 → design/trace-view.md、本文 → archive |

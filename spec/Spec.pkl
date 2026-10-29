@@ -1,0 +1,599 @@
+// 制約の台帳（正）。ここが唯一の宣言（ADR-0001、利用者の決定 2026-10-30）。
+// 検査は scripts/check-constraints.mjs が pkspec で行う。ビューは docs/generated/ に生成される。
+// tags の読み方：strength:*（MUST / MUST-NOT / SHOULD）、area:*（持ち場）、
+// ops＝リポジトリの CI では判定できず運用（点検・実機・計測）で確かめるもの
+amends "./pkl/Spec.pkl"
+
+feature = "ai-research constraints"
+
+goals {
+  new Goal { id = "GOAL-FAST"; name = "調査にかかる時間を短くする（無駄・遅さ・停滞を減らす）"; priority = 90; reviewStatus = "approved" }
+  new Goal { id = "GOAL-SAME-EVERYWHERE"; name = "どの機械・どの会話から依頼しても、同じ依頼には同じ結果が同じ速さで返る"; priority = 90; reviewStatus = "approved" }
+  new Goal { id = "GOAL-VERIFIED"; name = "答えの根拠は、原文と照合された引用である（確かさを人が追える）"; priority = 85; reviewStatus = "approved" }
+  new Goal { id = "GOAL-PRIMARY"; name = "論文・研究の知見を問う調査は一次資料に届く"; priority = 80; reviewStatus = "approved" }
+  new Goal { id = "GOAL-ON-PATH"; name = "調べものは、指定がなくてもこのシステムの経路を通る"; priority = 80; reviewStatus = "approved" }
+  new Goal { id = "GOAL-NO-BURDEN"; name = "利用者に習慣・設定・保守を求めない"; priority = 70; reviewStatus = "approved" }
+  new Goal { id = "GOAL-RESPECT"; name = "出典・外部サービス・第三者に配慮する（規約・頻度・著作権・送信の最小化）"; priority = 70; reviewStatus = "approved" }
+  new Goal { id = "GOAL-BOUNDED-COST"; name = "費用と資源に上限があり、超える前に止まる"; priority = 60; reviewStatus = "approved" }
+  new Goal { id = "GOAL-OBSERVABLE"; name = "調査の記録を、トークンをほぼ使わずに本人が見られる"; priority = 50; reviewStatus = "approved" }
+}
+
+scenarios {
+  new {
+    id = "W-01"
+    name = "依頼から60秒以内に、向きを確かめられる最初の結果を出す"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "W-02"
+    name = "利用者が向きを変えたら以降の作業に反映し、外れた作業を続けない"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "W-03"
+    name = "以前に確かめた事実は、出典が変わっていなければ読み直しに時間を使わない（機械・会話をまたいで）"
+    tags { "spec"; "strength:MUST"; "area:ledger" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST"; "GOAL-SAME-EVERYWHERE" }
+  }
+  new {
+    id = "W-04"
+    name = "4分を超える調査は、利用者が求めたとき（deepen）だけ行う"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST"; "GOAL-BOUNDED-COST" }
+  }
+  new {
+    id = "S-01"
+    name = "調査が長くなっても、1ステップあたりの時間と流入量が増え続けない"
+    tags { "spec"; "strength:MUST"; "area:run/budget" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "S-02"
+    name = "休憩やセッションの区切りを挟んでも、再開が大きく遅くならない"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "S-03"
+    name = "原文の取得は、選べる経路のうち最も速いものに近い（要約を挟まない）"
+    tags { "spec"; "strength:MUST"; "area:gateway" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "S-04"
+    name = "依頼の難しさに対して思考量を過大にしない"
+    tags { "spec"; "strength:SHOULD"; "area:conversation" }
+    severity = "minor"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "S-05"
+    name = "会話で回るターン数と流し込む量が、会話の長さや作業場所によって増えない"
+    tags { "spec"; "strength:MUST"; "area:mcp/budget" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST"; "GOAL-SAME-EVERYWHERE" }
+    openQuestions { "目標値 10秒の妥当性は未計測。テストに S-05 の ID タグがない" }
+  }
+  new {
+    id = "S-06"
+    name = "会話に流し込むのは、問いに関係する段落と最小の説明だけ。言語が違っても関係段落に届き、届かなければ理由が分かる"
+    tags { "spec"; "strength:MUST"; "area:select/policy" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "P-01"
+    name = "並行する作業のうち遅いものが、他の結果の提示を止めない"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "P-02"
+    name = "取れない出典は時間上限で打ち切り、結果に示す。同じ失敗を同じ調査で繰り返さない"
+    tags { "spec"; "strength:MUST"; "area:gateway" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "P-03"
+    name = "読み取りだけの操作で、承認待ちのために止まらない"
+    tags { "spec"; "strength:MUST"; "area:ops"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST"; "GOAL-NO-BURDEN" }
+  }
+  new {
+    id = "P-04"
+    name = "利用者への問いは結果と一緒に出し、返事を待って作業を止めない"
+    tags { "spec"; "strength:MUST"; "area:policy"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "P-05"
+    name = "システムの失敗は、種別・再試行の可否・次の手と一緒に値で返す"
+    tags { "spec"; "strength:MUST"; "area:boundary" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "P-06"
+    name = "作業が尽きたら待たせず終わる。0件のときは理由（見つからない/取れない/検索していない）が分かる"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "P-07"
+    name = "取得できた出典は、段落が選ばれなくても行き止まりにしない（find か経路外で読める）"
+    tags { "spec"; "strength:MUST"; "area:run/route" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "Q-01"
+    name = "主張ごとに出典と照合の状態が分かる。状態は「引用が原文にあるか」だけを表す。ラベルの一覧は1か所で決める"
+    tags { "spec"; "strength:MUST"; "area:verify/policy" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "Q-02"
+    name = "台帳から持ち込んだ事実を使った結果は、その場で取り直した場合と同じになる"
+    tags { "spec"; "strength:MUST"; "area:ledger" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "Q-03"
+    name = "システムが作った文（要約・解釈・結論）を、次の調査の根拠として持ち込まない"
+    tags { "spec"; "strength:MUST-NOT"; "area:ledger/core" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "Q-04"
+    name = "答えに影響した喪失は1件ずつ、それ以外は件数と URL で分かる。進行中は喪失と区別する"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "Q-05"
+    name = "事実・手順・道具の版・取得条件が機械ごとに分かれていない"
+    tags { "spec"; "strength:MUST"; "area:hub"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-SAME-EVERYWHERE" }
+  }
+  new {
+    id = "Q-06"
+    name = "会話の文脈に由来する内容を、確かめた事実として保存・持ち込みしない。会話から補った問いは結果に示す"
+    tags { "spec"; "strength:MUST"; "area:verify" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED"; "GOAL-SAME-EVERYWHERE" }
+  }
+  new {
+    id = "Q-07"
+    name = "経路を通らずに得た内容は、結果の上でそれと分かり、理由が示される。確認済の印は付かず台帳にも入らない"
+    tags { "spec"; "strength:MUST"; "area:route" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-ON-PATH" }
+  }
+  new {
+    id = "Q-08"
+    name = "論文・研究の知見を問う調査は一次資料（書誌・抄録、読めれば本文）に届く。届かない一次資料は理由つきで分かる"
+    tags { "spec"; "strength:MUST"; "area:scholarly" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-PRIMARY" }
+  }
+  new {
+    id = "U-01"
+    name = "決まった依頼形式・習慣・整理・機械ごとの設定を求めない。機械を足す作業はアカウント登録1回"
+    tags { "spec"; "strength:MUST"; "area:ops"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-NO-BURDEN" }
+  }
+  new {
+    id = "U-02"
+    name = "持ち込まれる事実を、利用者が直接読めて、消せる（1台で消せばどこからも消える）"
+    tags { "spec"; "strength:MUST"; "area:ledger" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-NO-BURDEN" }
+  }
+  new {
+    id = "U-03"
+    name = "外の事実が要る調べものは、道具を指定しなくてもこの経路を通る。明示か届かないときだけ経路外。否定の言い方は明示ではない"
+    tags { "spec"; "strength:MUST"; "area:route" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-ON-PATH" }
+  }
+  new {
+    id = "U-04"
+    name = "往復の回数と結果の形式は、問いの重さに合う（1つの事実は呼び出し2回以内・短い答え）"
+    tags { "spec"; "strength:SHOULD"; "area:modes" }
+    severity = "minor"
+    reviewStatus = "approved"
+    contributes { "GOAL-NO-BURDEN"; "GOAL-FAST" }
+  }
+  new {
+    id = "U-05"
+    name = "プラグインとハブの版のずれ、会話の途中の手順の変更が、その場で分かる"
+    tags { "spec"; "strength:MUST"; "area:route/policy" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-NO-BURDEN"; "GOAL-SAME-EVERYWHERE" }
+  }
+  new {
+    id = "E-01"
+    name = "残す原文は確かめるのに必要な短い範囲に限り、出典を明示し、第三者に配布しない"
+    tags { "spec"; "strength:MUST"; "area:ledger/core" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "E-02"
+    name = "取得先の規約と頻度制限を全機械の合計で守る。拒まれたら Retry-After だけ空ける"
+    tags { "spec"; "strength:MUST"; "area:limiter" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "E-03"
+    name = "取得した内容に含まれる指示に従わない"
+    tags { "spec"; "strength:MUST-NOT"; "area:sandbox/view" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT"; "GOAL-VERIFIED" }
+  }
+  new {
+    id = "E-04"
+    name = "依頼内容や私的な情報を、調査に必要な範囲を超えて外部に送らない"
+    tags { "spec"; "strength:MUST"; "area:gateway"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "E-05"
+    name = "フックがハブに送るもの・ハブが残すものは用途に要る最小で、README で確かめられる"
+    tags { "spec"; "strength:MUST"; "area:route/plugin" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "R-01"
+    name = "1回の依頼の消費トークンに上限があり、超える前に止めて知らせる"
+    tags { "spec"; "strength:MUST"; "area:budget" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-BOUNDED-COST" }
+  }
+  new {
+    id = "R-02"
+    name = "利用者が保守し続ける常駐サーバーを必要としない"
+    tags { "spec"; "strength:SHOULD"; "area:ops" }
+    severity = "minor"
+    reviewStatus = "approved"
+    contributes { "GOAL-NO-BURDEN" }
+  }
+  new {
+    id = "V-01"
+    name = "記録を見るのにトークンをほぼ使わない（開く1回・50トークン以下。見る道は LLM・取得に依存しない）"
+    tags { "spec"; "strength:MUST"; "area:view" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-02"
+    name = "1回の調査の流れが見える"
+    tags { "spec"; "strength:MUST"; "area:view" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-03"
+    name = "調査が探している概念とのずれが見える"
+    tags { "spec"; "strength:MUST"; "area:view/drift" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-04"
+    name = "取りこぼしの偏り（打ち切り・照合失敗をホスト・tier・kind ごとに）が見える"
+    tags { "spec"; "strength:MUST"; "area:trace" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-05"
+    name = "実行中の調査も start から1分以内に見える"
+    tags { "spec"; "strength:MUST"; "area:view" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-06"
+    name = "どの面から起こした調査も1か所に集まる"
+    tags { "spec"; "strength:MUST"; "area:trace"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-07"
+    name = "スマートフォンで見られる"
+    tags { "spec"; "strength:MUST"; "area:view"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-08"
+    name = "台帳と行き来できる"
+    tags { "spec"; "strength:SHOULD"; "area:view" }
+    severity = "minor"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-09"
+    name = "調査の記録を本人が消せる"
+    tags { "spec"; "strength:MUST"; "area:trace" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "V-10"
+    name = "手順の版の前後で取りこぼしの数を比べられる"
+    tags { "spec"; "strength:MUST"; "area:trace" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "C-01"
+    name = "モデルに見せる追加は research_view 1つだけ。ほかは app 専用"
+    tags { "spec"; "strength:MUST"; "area:mcp" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE"; "GOAL-BOUNDED-COST" }
+  }
+  new {
+    id = "C-02"
+    name = "記録のためにモデルに書かせない（概念はコードで取り出す）"
+    tags { "spec"; "strength:MUST"; "area:drift" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "C-03"
+    name = "記録の書き込みは調査を遅くせず、失敗しても調査は失敗しない"
+    tags { "spec"; "strength:MUST"; "area:trace" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+  new {
+    id = "C-04"
+    name = "原文の全文・段落の本文を記録に残さない"
+    tags { "spec"; "strength:MUST-NOT"; "area:trace" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "C-05"
+    name = "記録は本人だけが見られる（既存のコネクタの認証を通す）"
+    tags { "spec"; "strength:MUST"; "area:mcp/auth" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "C-06"
+    name = "開く結果に件数程度しか入れない（会話にデータを残さない）"
+    tags { "spec"; "strength:MUST"; "area:mcp" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "C-07"
+    name = "見える化のために常駐サーバーを持たない"
+    tags { "spec"; "strength:MUST"; "area:ops"; "ops" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-NO-BURDEN" }
+  }
+  new {
+    id = "C-08"
+    name = "記録は追記のみ、取り消しは墓標"
+    tags { "spec"; "strength:MUST"; "area:trace" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "C-09"
+    name = "取得した文字列はデータとして扱う（View は textContent だけ）"
+    tags { "spec"; "strength:MUST"; "area:view" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "C-10"
+    name = "保持期間（既定90日）を過ぎた記録は消す"
+    tags { "spec"; "strength:MUST"; "area:trace" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "C-11"
+    name = "View からモデルへ書き戻さない"
+    tags { "spec"; "strength:MUST-NOT"; "area:view" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-OBSERVABLE" }
+  }
+  new {
+    id = "INV-1"
+    name = "台帳のどのレコードも、抜き書きは確かめた時点の原文（正規化後）の部分文字列である"
+    tags { "spec"; "strength:MUST"; "area:ledger" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "INV-2"
+    name = "台帳は追記のみ。既存レコードは変わらない（物理消去を除く）"
+    tags { "spec"; "strength:MUST"; "area:ledger" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "INV-3"
+    name = "墓標の付いたレコード・出典は、以後のどの実行にも候補として返らない"
+    tags { "spec"; "strength:MUST"; "area:ledger" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-NO-BURDEN" }
+  }
+  new {
+    id = "INV-4"
+    name = "実行は、開始時の台帳の番号より後のレコードを読まない"
+    tags { "spec"; "strength:MUST"; "area:ledger" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-SAME-EVERYWHERE" }
+  }
+  new {
+    id = "INV-5"
+    name = "「引用確認済」の印は、その回に原文と照合できたものにだけ付く"
+    tags { "spec"; "strength:MUST"; "area:verify" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "INV-6"
+    name = "同じホストへの取得の開始時刻は、全機械を通して最小間隔以上あく"
+    tags { "spec"; "strength:MUST"; "area:limiter" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "INV-7"
+    name = "同じホストへの同時の取得は上限以下"
+    tags { "spec"; "strength:MUST"; "area:limiter" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "INV-8"
+    name = "締め切りで終わっていない現在の版の作業は、done でなければ pending に、done なら cutoffs（gave_up）に必ず現れる"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED"; "GOAL-FAST" }
+  }
+  new {
+    id = "INV-9"
+    name = "使用量は段階の上限を超えない"
+    tags { "spec"; "strength:MUST"; "area:budget" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-BOUNDED-COST" }
+  }
+  new {
+    id = "INV-10"
+    name = "現在の結果として返すのは、現在の版の作業の結果だけ"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED" }
+  }
+  new {
+    id = "INV-11"
+    name = "深掘りでなければ、続きの上限（4分）を過ぎて作業を始めない"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-BOUNDED-COST" }
+  }
+  new {
+    id = "INV-12"
+    name = "コードの実行環境からの外への通信は、取得の出口を通るものだけ"
+    tags { "spec"; "strength:MUST"; "area:sandbox" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "INV-13"
+    name = "原文の全文はどのストレージにも書かれない（メモリだけ）"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-RESPECT" }
+  }
+  new {
+    id = "INV-14"
+    name = "同じ実行の中で失敗した URL には、再び取得を始めない"
+    tags { "spec"; "strength:MUST"; "area:run" }
+    severity = "critical"
+    reviewStatus = "approved"
+    contributes { "GOAL-FAST" }
+  }
+}
