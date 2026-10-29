@@ -2,33 +2,19 @@
 
 ---
 
-**Title:** `pkspec-adapter-vitest discover` aborts (SIGABRT) on test files containing raw surrogate-pair (emoji) literals
+**Title:** `pkspec-adapter-vitest discover` SIGABRTs when a scanned test file contains a non-BMP (surrogate-pair) character
 
 **Body:**
 
-`pkspec-adapter-vitest discover` (pkspec@0.4.2, linux-amd64 release tarball) exits with SIGABRT (code 134, no output) on the file below. `vitest list` and `pkspec-adapter-vitest run --manifest` succeed on the same project.
+Repro (pkspec@0.4.2 linux-amd64 release tarball; no vitest or node_modules needed):
 
-```ts
-// test/a.test.ts — vitest config: { include: ["test/**/*.test.ts"] }
-// src/index.ts is a 4-line clipChars stub
-import { describe, expect, it } from "vitest";
-import { clipChars } from "../src/index.ts";
-
-describe("記録の整形（例）", () => {
-  const base = { runId: "run_1", at: 1, ev: 1, v: 1 };
-
-  it("サロゲートの組を割らずに切る", () => {
-    expect(clipChars("😀😀😀", 2)).toBe("😀😀");
-  });
-});
+```sh
+mkdir -p test && printf '// 😀\n' > test/a.test.ts
+pkspec-adapter-vitest discover   # => SIGABRT (exit 134, no output)
 ```
 
-| variant | vitest 4.1.12 | vitest 5.0.5 |
-| --- | --- | --- |
-| as above | SIGABRT | SIGABRT |
-| emoji written as `"\u{1F600}"` escapes | OK | OK |
-| small edits near the emoji (add/remove a line) | flips to OK in some cases | still SIGABRT |
+Without the emoji the same layout succeeds. `run --manifest` is unaffected.
 
-The only necessary ingredient is a raw surrogate-pair literal in the file; whether it crashes flips with small content changes and the vitest version, suggesting the abort depends on the byte/char offset of the surrogate pair in something the shim processes.
+Where it happens: `discover` scans files itself (`src/adaptershim/discover.mbt`, `parse_js_test_file`) and applies `js_test_re` per line. Any line containing a surrogate pair that the regexp engine has to traverse aborts — a line where `it("name")` matches *before* the emoji passes (early return), while a non-matching line or an emoji inside the name capture crashes. So it looks like the regexp engine mis-steps at a surrogate boundary (char vs UTF-16 code-unit indexing).
 
-Environment: Linux x86_64, Node 22/26, vitest 4.1.12 / 5.0.5.
+Observed on Linux x86_64. Workaround we use: write non-BMP characters in test sources as `\u{...}` escapes.
