@@ -18,10 +18,15 @@ export interface Env {
   OAUTH_PROVIDER: OAuthHelpers;
   /** 利用者本人だけが知る合言葉（OAuth の同意ページで確かめる） */
   OWNER_PASSPHRASE?: string;
-  /** brave | tavily | none */
+  /** brave | tavily | searxng | none */
   SEARCH_PROVIDER?: string;
   BRAVE_API_KEY?: string;
   TAVILY_API_KEY?: string;
+  /** 自前ホストの SearXNG（server の ADR-0017）。URL は Cloudflare Tunnel の公開ホスト名 */
+  SEARXNG_URL?: string;
+  /** Cloudflare Access の service token（公開面の真正性検証。SEC-9） */
+  SEARXNG_CF_ACCESS_CLIENT_ID?: string;
+  SEARXNG_CF_ACCESS_CLIENT_SECRET?: string;
   GITHUB_TOKEN?: string;
   /** 試験用：外への取得をこのサービスに向ける（偽の取得先サーバー） */
   TEST_UPSTREAM?: Fetcher;

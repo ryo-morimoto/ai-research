@@ -515,6 +515,19 @@ export class Gateway {
         if (!r.ok) return { ok: false, cutoff: { what: `検索: ${query}`, why: "error", detail: `HTTP ${r.status}` } };
         const j = (await r.json()) as { results?: { url: string; title: string; content?: string }[] };
         hits = (j.results ?? []).map((x) => ({ url: x.url, title: x.title, snippet: x.content ?? "" }));
+      } else if (provider === "searxng") {
+        // 自前ホストの SearXNG（server の ADR-0017）。真正性は Cloudflare Access の service token で確かめる
+        if (!this.env.SEARXNG_URL) return { ok: false, cutoff: { what: `検索: ${query}`, why: "not_configured", detail: "SEARXNG_URL がない" } };
+        const u = `${this.env.SEARXNG_URL.replace(/\/$/, "")}/search?q=${encodeURIComponent(query)}&format=json`;
+        const headers: Record<string, string> = { Accept: "application/json" };
+        if (this.env.SEARXNG_CF_ACCESS_CLIENT_ID && this.env.SEARXNG_CF_ACCESS_CLIENT_SECRET) {
+          headers["CF-Access-Client-Id"] = this.env.SEARXNG_CF_ACCESS_CLIENT_ID;
+          headers["CF-Access-Client-Secret"] = this.env.SEARXNG_CF_ACCESS_CLIENT_SECRET;
+        }
+        const r = await this.raw(u, { headers });
+        if (!r.ok) return { ok: false, cutoff: { what: `検索: ${query}`, why: "error", detail: `HTTP ${r.status}` } };
+        const j = (await r.json()) as { results?: { url: string; title: string; content?: string }[] };
+        hits = (j.results ?? []).slice(0, n).map((x) => ({ url: x.url, title: x.title, snippet: x.content ?? "" }));
       } else if (provider === "test") {
         const r = await this.raw(`https://search.test/search?q=${encodeURIComponent(query)}`);
         const j = (await r.json()) as { results?: SearchHit[] };
