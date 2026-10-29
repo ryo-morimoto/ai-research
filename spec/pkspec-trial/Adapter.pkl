@@ -1,0 +1,45 @@
+amends "./pkl/Adapter.pkl"
+
+import "./pkl/adapters/Vitest.pkl" as Vitest
+
+// vitest への接続（overlay）：既存のテストケースに specRef を付ける。
+// ケースの鍵は「ファイル::テスト名」
+
+local class HubVitest extends Vitest.Vitest {
+  configPath = "packages/hub/vitest.config.ts"
+  include = new { "test/**/*.test.ts" }
+}
+
+local class CoreVitest extends Vitest.Vitest {
+  configPath = "packages/core/vitest.config.ts"
+  include = new { "test/**/*.test.ts" }
+}
+
+suites {
+  new {
+    name = "hub"
+    adapter = new HubVitest {}
+    workdir = "../../packages/hub"
+    overlays {
+      ["test/run.test.ts::W-01・P-01：締め切りまでに最初の束を返す（遅い取得が提示を止めない）。拒まれた取得は打ち切りとして見える"] = new CaseOverlay {
+        specRef { "W-01" }
+      }
+      ["test/run.test.ts::INV-8：締め切りで終わっていない作業は pending（喪失ではない）として返り、続きで届く（設計 v1.5 §8.3.2）"] = new CaseOverlay {
+        specRef { "INV-8" }
+      }
+      ["test/mcp.test.ts::tools/list：モデルに見える道具は code・台帳の3つ・経路の計数と、開くツール research_view だけ（docs/05 C-01）"] = new CaseOverlay {
+        specRef { "C-01" }
+      }
+    }
+  }
+  new {
+    name = "core"
+    adapter = new CoreVitest {}
+    workdir = "../../packages/core"
+    overlays {
+      ["test/properties.test.ts::N(原文) の部分文字列は exact"] = new CaseOverlay {
+        specRef { "Q-01" }
+      }
+    }
+  }
+}

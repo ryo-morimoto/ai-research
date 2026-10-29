@@ -1,0 +1,5 @@
+{"ts":"1970-01-01T00:00:00Z","test":"C-01 は mcp.test の tools/list の固定が実装","duration_ms":3,"outcome":"pass","env":"local","kind":"shell"}
+{"ts":"1970-01-01T00:00:00Z","test":"INV-8 は specs/run.qnt と run.test が実装","duration_ms":3,"outcome":"pass","env":"local","kind":"shell"}
+{"ts":"1970-01-01T00:00:00Z","test":"Q-01 は照合の性質テストと check-budget のラベル検査が実装","duration_ms":3,"outcome":"pass","env":"local","kind":"shell"}
+{"ts":"1970-01-01T00:00:00Z","test":"S-05 は bench の依頼セットで測る","duration_ms":1,"outcome":"pass","env":"local","kind":"shell"}
+{"ts":"1970-01-01T00:00:00Z","test":"W-01 は run.test の締め切りの試験が実装","duration_ms":2,"outcome":"pass","env":"local","kind":"shell"}
