@@ -50,49 +50,47 @@ export type TraceEvent =
       kind?: string;
       tier?: string;
       title?: string;
-      origin?: string;
+      origin?: TraceOrigin;
       ms?: number;
       reused?: boolean;
     })
   | (Base & { type: "passage.selected"; passageId: string; sourceId: string; context?: string; chars?: number; via?: string })
   | (Base & { type: "ledger.hit"; recordId: string; status: string; url?: string; reason?: string })
   | (Base & { type: "verify.done"; claims?: TraceClaim[] })
-  | (Base & { type: "cutoff"; what: string; why: string; host?: string; kind?: string; tier?: string; origin?: string; detail?: string });
+  | (Base & { type: "cutoff"; what: string; why: string; host?: string; kind?: string; tier?: string; origin?: TraceOrigin; detail?: string });
 
 export type TraceEventType = TraceEvent["type"];
 
 /** 欄の種類。q は問い、s は短い文字列、u は URL、n は数、b は真偽、ss は文字列の並び、us は URL の並び、c は主張の並び */
 type FieldKind = "q" | "s" | "u" | "n" | "b" | "ss" | "us" | "c";
+/** 末尾の ! は必須の欄（ない・形が違うなら事象ごと捨てる）。それ以外は任意 */
+type FieldSpec = FieldKind | `${FieldKind}!`;
 
 const COMMON: Record<string, FieldKind> = { runId: "s", at: "n", ev: "n", v: "n" };
 
-/** 種類ごとに残す欄。ここにない欄は保存しない */
-const SCHEMA: Record<TraceEventType, Record<string, FieldKind>> = {
-  "run.started": { question: "q", mode: "s", sources: "ss", queries: "ss", urls: "us", procedure: "s", procedureVersion: "s", client: "s" },
-  "run.steered": { question: "q", queries: "ss", urls: "us" },
+/**
+ * 種類ごとに残す欄（ここにない欄は保存しない）と、必須の印（!）。欄の定義はここ1か所。
+ * 型（TraceEvent）とこの表のずれはコンパイルで落ちる（欄の名前が過不足なく一致することを型で強制する）
+ */
+const SCHEMA: { [T in TraceEventType]: Record<Exclude<keyof Extract<TraceEvent, { type: T }>, keyof Base | "type">, FieldSpec> } = {
+  "run.started": { question: "q!", mode: "s!", sources: "ss", queries: "ss", urls: "us", procedure: "s", procedureVersion: "s", client: "s" },
+  "run.steered": { question: "q!", queries: "ss", urls: "us" },
   "run.deepened": {},
-  "run.done": { why: "s", searched: "n", found: "n", fetched: "n", failed: "n", elapsedMs: "n" },
-  "search.sent": { query: "s", provider: "s", ok: "b", hits: "n" },
-  "source.fetched": { sourceId: "s", url: "u", host: "s", kind: "s", tier: "s", title: "s", origin: "s", ms: "n", reused: "b" },
-  "passage.selected": { passageId: "s", sourceId: "s", context: "s", chars: "n", via: "s" },
-  "ledger.hit": { recordId: "s", url: "u", status: "s", reason: "s" },
+  "run.done": { why: "s!", searched: "n", found: "n", fetched: "n", failed: "n", elapsedMs: "n" },
+  "search.sent": { query: "s!", provider: "s!", ok: "b", hits: "n" },
+  "source.fetched": { sourceId: "s!", url: "u!", host: "s", kind: "s", tier: "s", title: "s", origin: "s", ms: "n", reused: "b" },
+  "passage.selected": { passageId: "s!", sourceId: "s!", context: "s", chars: "n", via: "s" },
+  "ledger.hit": { recordId: "s!", url: "u", status: "s!", reason: "s" },
   "verify.done": { claims: "c" },
-  cutoff: { what: "u", why: "s", host: "s", kind: "s", tier: "s", origin: "s", detail: "s" },
+  cutoff: { what: "u!", why: "s!", host: "s", kind: "s", tier: "s", origin: "s", detail: "s" },
 };
 
-/** 欄の型が必須か（ない・形が違うなら事象ごと捨てる）。それ以外は任意 */
-const REQUIRED: Record<TraceEventType, string[]> = {
-  "run.started": ["question", "mode"],
-  "run.steered": ["question"],
-  "run.deepened": [],
-  "run.done": ["why"],
-  "search.sent": ["query", "provider"],
-  "source.fetched": ["sourceId", "url"],
-  "passage.selected": ["passageId", "sourceId"],
-  "ledger.hit": ["recordId", "status"],
-  "verify.done": [],
-  cutoff: ["what", "why"],
-};
+const kindOf = (spec: FieldSpec): FieldKind => (spec.endsWith("!") ? spec.slice(0, -1) : spec) as FieldKind;
+
+/** 必須の欄（SCHEMA の ! から導く） */
+const REQUIRED: Record<TraceEventType, string[]> = Object.fromEntries(
+  (Object.keys(SCHEMA) as TraceEventType[]).map((t) => [t, Object.entries<FieldSpec>(SCHEMA[t]).filter(([, s]) => s.endsWith("!")).map(([k]) => k)]),
+) as Record<TraceEventType, string[]>;
 
 export const TRACE_EVENT_TYPES = Object.keys(SCHEMA) as TraceEventType[];
 
@@ -187,8 +185,8 @@ export function sanitizeTraceEvent(input: unknown, limits: TraceLimits = TRACE_L
     if (val === undefined || val === "") return null;
     out[k] = val;
   }
-  for (const [k, kind] of Object.entries(SCHEMA[t])) {
-    const val = field(kind, o[k], limits);
+  for (const [k, spec] of Object.entries<FieldSpec>(SCHEMA[t])) {
+    const val = field(kindOf(spec), o[k], limits);
     if (val !== undefined) out[k] = val;
   }
   for (const k of REQUIRED[t]) if (out[k] === undefined) return null;

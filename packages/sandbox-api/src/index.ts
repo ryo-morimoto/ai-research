@@ -174,8 +174,28 @@ export type AroundResult = { sources: Record<string, SourceRef>; passages: Passa
 export type HubErrorCode = "busy" | "run_not_found" | "bad_input" | "internal";
 export type HubError = { error: { code: HubErrorCode; retryable: boolean; message: string; next: string; runId?: string } };
 
-/** モデルが読む型定義。道具の説明文に埋め込む */
-export const SANDBOX_TYPES = `
+/**
+ * モデルに見せる入力の上限（issue 002）。値の正は policy（POLICY から導く）。
+ * 上限を型定義の文に埋め込み、超えた値は境界で丸めて clamped で知らせる（bad_input で往復させない）
+ */
+export type SandboxBounds = {
+  /** next・steer の waitMs の上限（ms） */
+  waitMsMax: number;
+  /** 最初の束を待つ上限（ms、種類ごと） */
+  startMs: { lookup: number; survey: number };
+  /** 1つの束の段落の上限（種類ごと）。maxPassages はこれより小さくだけできる */
+  maxPassages: { lookup: number; survey: number };
+  /** around の before・after の上限 */
+  aroundMax: number;
+  /** find が返す段落の上限 */
+  findLimitMax: number;
+};
+
+/** モデルが読む型定義。道具の説明文に埋め込む。上限値は方針（policy）から渡す */
+export function sandboxTypes(b: SandboxBounds): string {
+  const sec = (ms: number) => `${ms / 1000}秒`;
+  const range = Array.from({ length: b.aroundMax + 1 }, (_, i) => i).join(" | ");
+  return `
 type Source = { kind: "web" | "github" | "arxiv" | "work"; url: string; title?: string; locator?: string;
   tier: "paper" | "official" | "encyclopedia" | "other"; work?: { authors: string[]; year?: number; venue?: string; doi?: string; abstract?: false } };
 type Passage = { passageId: string; sourceId: string; text: string; context?: string };  // context は見出し（引用しない）
@@ -191,13 +211,15 @@ type Q = { question: string; queries?: string[]; urls?: string[]; sources?: ("we
 type Extra = Promise<{ sources: Record<string, Source>; passages: Passage[]; notices: { kind: string }[] } | HubError>;
 
 declare const research: {
-  start(q: Q & { mode: "lookup" | "survey"; maxPassages?: number }): Promise<Bundle | HubError>;   // 最大 survey 25秒・lookup 15秒
-  next(runId: string, opts?: { waitMs?: number }): Promise<Bundle | HubError>;
-  around(runId: string, passageId: string, opts?: { before?: 0 | 1 | 2 | 3; after?: 0 | 1 | 2 | 3 }): Extra;
-  find(runId: string, sourceIdOrUrl: string, text: string): Extra;
+  // 待ちは survey ${sec(b.startMs.survey)}・lookup ${sec(b.startMs.lookup)}。maxPassages は lookup ${b.maxPassages.lookup}・survey ${b.maxPassages.survey} まで（超えた分は丸めて clamped）
+  start(q: Q & { mode: "lookup" | "survey"; maxPassages?: number }): Promise<Bundle | HubError>;
+  next(runId: string, opts?: { waitMs?: number }): Promise<Bundle | HubError>;   // waitMs は ${sec(b.waitMsMax)}まで（超えた分は丸める）
+  around(runId: string, passageId: string, opts?: { before?: ${range}; after?: ${range} }): Extra;
+  find(runId: string, sourceIdOrUrl: string, text: string, opts?: { limit?: number }): Extra;   // limit は ${b.findLimitMax} まで
   verify(runId: string, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<{ statuses: Status[] } | HubError>;
   steer(runId: string, q: Q): Promise<Bundle | HubError>;
   deepen(runId: string): Promise<Bundle | HubError>;
   help(): Promise<{ procedure: string; description: string }>;   // 今の手順と型
 };
 `.trim();
+}

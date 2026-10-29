@@ -21,11 +21,13 @@ import {
   hostOf,
   type BudgetState,
   type Fingerprint,
+  type TraceEvent,
+  type TraceEventType,
   type Paragraph,
   type Phase,
   type Source,
 } from "@ai-research/core";
-import { EMPTY_NEXT, POLICY, VERIFY_NEXT, procedureVersion, tierOf } from "@ai-research/policy";
+import { EMPTY_NEXT, INPUT_BOUNDS, POLICY, VERIFY_NEXT, procedureVersion, tierOf } from "@ai-research/policy";
 
 /**
  * 束に出す出典を軽くする（設計 v1.5 §8.3.7）：URL と同じ locator は省く。著者は POLICY.sourceAuthorsMax 人まで
@@ -226,9 +228,10 @@ export class RunDO extends DurableObject<Env> {
 
   /**
    * 調査の記録に事象を1件積む（docs/05）。送るのは待たない（C-03）。
-   * 段落の本文は渡さない（C-04）。TraceDO の側でも整形で落とす
+   * 段落の本文は渡さない（C-04）。TraceDO の側でも整形で落とす。
+   * 欄は core/trace.ts の TraceEvent で型を強制する（欄の名前の誤りは整形で黙って落ちるため、ここで防ぐ）
    */
-  private trace(type: string, data: Record<string, unknown>): void {
+  private trace<T extends TraceEventType>(type: T, data: Omit<Extract<TraceEvent, { type: T }>, "type" | "runId" | "at" | "ev">): void {
     const m = this.meta;
     if (!m) return;
     this.traceBuf.push({ type, runId: m.runId, at: Date.now(), ev: ++this.counters.trace, ...data });
@@ -936,7 +939,7 @@ export class RunDO extends DurableObject<Env> {
       v: 1,
       question,
       mode: meta.mode,
-      sources: meta.sources,
+      sources: meta.sources ?? ["web"],
       queries,
       urls,
       procedure: POLICY.revision,
@@ -1152,7 +1155,7 @@ export class RunDO extends DurableObject<Env> {
     const m = await this.load();
     if (!m) return { statuses: [], notices: [{ kind: "run_not_found" }] };
     const notices: Notice[] = [];
-    const list = Array.isArray(claims) ? claims.slice(0, 50) : [];
+    const list = Array.isArray(claims) ? claims.slice(0, INPUT_BOUNDS.claimsMax) : [];
     const want = estimateJsonTokens(list) + list.length * 30;
     const a = admit(m.budget, want, this.caps());
     m.budget = a.state;

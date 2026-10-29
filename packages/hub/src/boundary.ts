@@ -1,14 +1,19 @@
 import { z } from "zod";
-import type { ClaimInput, HubError, HubErrorCode, QuestionInput } from "@ai-research/sandbox-api";
+import { INPUT_BOUNDS as B } from "@ai-research/policy";
+import type { ClaimInput, HubError, HubErrorCode, Notice, QuestionInput } from "@ai-research/sandbox-api";
 
 /**
  * 実行環境（会話の Claude が書いたコード）とハブの境界（設計 v1.3 D12、制約 P-05）。
  * - 入ってくる値はここで型に直す。内部では確かめ直さない（pstack: Boundary Discipline）
  * - 出ていく失敗はここで種別に直す。内部の事情の文だけを返さない
+ * - 上限の数はここに書かない。正は policy の INPUT_BOUNDS（issue 002：境界が POLICY より狭くて往復していた）
+ * - 直し方が自明な数値の超過は、拒まず丸めて clamped で知らせる（設計 v1.5 §8.3.7）。拒むのは型・形の誤りだけ
  */
 
 const str = z.string().trim().min(1);
-const strList = z.array(z.string()).max(8).optional();
+const strList = z.array(z.string()).max(B.listMax).optional();
+/** 上限は丸める（clampMax）。ここでは拒まない */
+const waitMs = z.number().min(0).optional();
 
 const sourceSet = z.array(z.enum(["web", "scholarly"])).min(1).max(2).optional();
 
@@ -16,30 +21,36 @@ export const StartInput = z.object({
   question: str,
   mode: z.enum(["lookup", "survey"]),
   sources: sourceSet,
-  waitMs: z.number().min(0).max(60_000).optional(),
-  maxPassages: z.number().int().min(1).max(50).optional(),
+  waitMs,
+  maxPassages: z.number().int().min(1).optional(),
   scope: z.string().optional(),
-  exclusions: z.array(z.string()).max(16).optional(),
+  exclusions: z.array(z.string()).max(B.exclusionsMax).optional(),
   queries: strList,
-  urls: z.array(z.string().url()).max(8).optional(),
+  urls: z.array(z.string().url()).max(B.listMax).optional(),
 });
 export const SteerInput = z.object({
   question: str,
   queries: strList,
-  urls: z.array(z.string().url()).max(8).optional(),
+  urls: z.array(z.string().url()).max(B.listMax).optional(),
   sources: sourceSet,
-  waitMs: z.number().min(0).max(60_000).optional(),
+  waitMs,
 });
 export const ClaimsInput = z
-  .array(z.object({ text: z.string(), cite: z.array(z.object({ passageId: z.string(), quote: z.string() })).max(8) }))
-  .max(50);
+  .array(z.object({ text: z.string(), cite: z.array(z.object({ passageId: z.string(), quote: z.string() })).max(B.listMax) }))
+  .max(B.claimsMax);
 export const RunIdInput = z.string().regex(/^run_[A-Za-z0-9-]{8,80}$/);
-export const NextOpts = z.object({ waitMs: z.number().min(0).max(60_000).optional() }).optional();
+export const NextOpts = z.object({ waitMs }).optional();
 export const PassageIdInput = z.string().regex(/^[ph]\d{1,9}$/);
-export const FindInput = z.object({ source: z.string().min(1).max(2_000), text: z.string().trim().min(1).max(300) });
+export const FindInput = z.object({ source: z.string().min(1).max(B.sourceMaxChars), text: z.string().trim().min(1).max(B.findTextMaxChars) });
 export const FindOpts = z.object({ limit: z.number().int().min(1).optional() }).optional();
-/** before・after は 0〜3。超えた値は丸めて clamped で知らせる（bad_input で往復させない。設計 v1.5 §8.3.7） */
 export const AroundOpts = z.object({ before: z.number().int().min(0).optional(), after: z.number().int().min(0).optional() }).optional();
+
+/** 上限を超えた数値は丸め、clamped で知らせる（bad_input で往復させない。設計 v1.5 §8.3.7、issue 002） */
+export function clampMax(notices: Notice[], field: string, max: number, v: number | undefined): number | undefined {
+  if (v === undefined || v <= max) return v;
+  notices.push({ kind: "clamped", field, max });
+  return max;
+}
 
 export class BadInput extends Error {}
 

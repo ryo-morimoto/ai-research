@@ -6,7 +6,8 @@ import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
 import { routeStub } from "./route.ts";
-import { AroundOpts, FindInput, FindOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, hubError, parse, runNotFound } from "./boundary.ts";
+import { AroundOpts, FindInput, FindOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, clampMax, hubError, parse, runNotFound } from "./boundary.ts";
+import { INPUT_BOUNDS } from "@ai-research/policy";
 
 /**
  * code mode の実行環境に渡す関数（docs/03 §2.3）。
@@ -43,6 +44,11 @@ function tooManyStarts(): HubError {
 const firstArg = (args: unknown[]) => (typeof args[0] === "string" ? args[0] : undefined);
 const notFound = (b: { notices?: { kind: string }[] }, runId: string) =>
   b.notices?.some((n) => n.kind === "run_not_found") ? runNotFound(runId) : b;
+/** 丸めた知らせを結果の先頭に足す */
+const withNotices = <T extends { notices: Notice[] }>(r: T, notices: Notice[]): T => {
+  if (notices.length) r.notices = [...notices, ...r.notices];
+  return r;
+};
 
 export function providers(env: Env, client?: string): ResolvedProvider[] {
   // 1回の code で始められる調査の数（設計 v1.5 §8.3.5）。providers は code の呼び出しごとに作られる
@@ -51,34 +57,41 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
     start: guarded(async (q: unknown) => {
       const input = parse(StartInput, q, "start") as QuestionInput;
       if (++starts > POLICY.fanout.maxStartsPerCode) return tooManyStarts();
+      // 種類の上限を超えた値は丸めて知らせる（issue 002）。正は POLICY.modes
+      const notices: Notice[] = [];
+      const mode = POLICY.modes[input.mode];
+      const w = clampMax(notices, "waitMs", mode.startMs, input.waitMs);
+      if (w !== undefined) input.waitMs = w;
+      const p = clampMax(notices, "maxPassages", mode.passagesPerBundle, input.maxPassages);
+      if (p !== undefined) input.maxPassages = p;
       const runId = `run_${crypto.randomUUID()}`;
       await routeStub(env).noteResearchStart().catch(() => {});
-      return runStub(env, runId).start(runId, input, client);
+      return withNotices((await runStub(env, runId).start(runId, input, client)) as Bundle, notices);
     }),
     next: guarded(async (runId: unknown, opts?: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
       const o = parse(NextOpts, opts, "opts");
-      return notFound((await runStub(env, id).next(Number(o?.waitMs ?? 0))) as Bundle, id);
+      const notices: Notice[] = [];
+      const wait = clampMax(notices, "waitMs", INPUT_BOUNDS.waitMsMax, o?.waitMs) ?? 0;
+      return notFound(withNotices((await runStub(env, id).next(wait)) as Bundle, notices), id);
     }, firstArg),
     around: guarded(async (runId: unknown, passageId: unknown, opts?: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
       const pid = parse(PassageIdInput, passageId, "passageId");
       const o = parse(AroundOpts, opts, "opts");
-      const max = POLICY.around.maxEach;
-      const clamped: Notice[] = [];
-      const clamp = (field: "before" | "after", v: number | undefined) => {
-        if (v !== undefined && v > max) clamped.push({ kind: "clamped", field, max });
-        return Math.min(max, v ?? 1);
-      };
-      const r = await runStub(env, id).around(pid, clamp("before", o?.before), clamp("after", o?.after));
-      if (clamped.length) r.notices = [...clamped, ...r.notices];
-      return notFound(r, id);
+      const notices: Notice[] = [];
+      const before = clampMax(notices, "before", INPUT_BOUNDS.aroundMax, o?.before) ?? 1;
+      const after = clampMax(notices, "after", INPUT_BOUNDS.aroundMax, o?.after) ?? 1;
+      const r = await runStub(env, id).around(pid, before, after);
+      return notFound(withNotices(r, notices), id);
     }, firstArg),
     find: guarded(async (runId: unknown, source: unknown, text: unknown, opts?: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
       const f = parse(FindInput, { source, text }, "find");
       const o = parse(FindOpts, opts, "opts");
-      return notFound(await runStub(env, id).find(f.source, f.text, o?.limit ?? POLICY.find.maxResults), id);
+      const notices: Notice[] = [];
+      const limit = clampMax(notices, "limit", INPUT_BOUNDS.findLimitMax, o?.limit) ?? INPUT_BOUNDS.findLimitMax;
+      return notFound(withNotices(await runStub(env, id).find(f.source, f.text, limit), notices), id);
     }, firstArg),
     verify: guarded(async (runId: unknown, claims: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
@@ -88,11 +101,13 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
     steer: guarded(async (runId: unknown, q: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
       const input = parse(SteerInput, q, "steer");
-      const q2: { question: string; queries: string[]; urls?: string[]; sources?: ("web" | "scholarly")[] } = { question: input.question, queries: input.queries ?? [] };
+      const notices: Notice[] = [];
+      const waitMs = clampMax(notices, "waitMs", INPUT_BOUNDS.waitMsMax, input.waitMs);
+      const q2: { question: string; queries: string[]; urls?: string[]; sources?: ("web" | "scholarly")[]; waitMs?: number } = { question: input.question, queries: input.queries ?? [] };
       if (input.urls) q2.urls = input.urls;
       if (input.sources) q2.sources = input.sources;
-      if (input.waitMs !== undefined) (q2 as { waitMs?: number }).waitMs = input.waitMs;
-      return notFound((await runStub(env, id).steer(q2)) as Bundle, id);
+      if (waitMs !== undefined) q2.waitMs = waitMs;
+      return notFound(withNotices((await runStub(env, id).steer(q2)) as Bundle, notices), id);
     }, firstArg),
     deepen: guarded(async (runId: unknown) => {
       const id = parse(RunIdInput, runId, "runId");

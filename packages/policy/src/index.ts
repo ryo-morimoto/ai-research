@@ -5,7 +5,7 @@
  * 中身が変われば procedure_version（内容ハッシュ）が変わり、実行記録で比べられる（Q-05）。
  */
 import { LIMITS, TRACE_LIMITS, DEFAULT_CAPS, DEFAULT_TOKEN_FACTORS, textHash, type Tier } from "@ai-research/core";
-import { SANDBOX_TYPES } from "@ai-research/sandbox-api";
+import { sandboxTypes, type CutoffReason } from "@ai-research/sandbox-api";
 
 export type HostPolicy = { pattern: string; minIntervalMs: number; maxConcurrent: number; timeoutMs?: number };
 
@@ -195,7 +195,7 @@ export const POLICY = {
     explicitReasonsKeep: 200,
     explicitMatchMaxChars: 40,
     /** ai-research で取れなかった URL を、組み込みの取得に回してよい理由。policy・robots は回さない（E-02） */
-    cutoffAllowReasons: ["blocked", "timeout", "gave_up", "error", "unsupported", "no_passage", "not_found"],
+    cutoffAllowReasons: ["blocked", "timeout", "gave_up", "error", "unsupported", "no_passage", "not_found"] satisfies readonly CutoffReason[],
     /** 取れなかった URL を覚えておく時間 */
     cutoffTtlMs: 30 * 60_000,
     /** 会話ごとの明示の印を覚えておく時間（次の依頼で上書きされる） */
@@ -214,6 +214,30 @@ export const POLICY = {
     /** ai-research の検索が使えなかった（検索サービスの失敗・未設定）ときに、組み込みの検索を通す時間（設計 v1.4 §8.2.4） */
     searchDownTtlMs: 10 * 60_000,
   },
+} as const;
+
+/**
+ * 実行環境から入る値の上限（境界 hub/boundary.ts と、モデルに見せる型定義が同じ値を使う）。
+ * 正はここ（POLICY から導く）。境界の Zod に別の数を直書きしない（issue 002：境界が POLICY より狭くて bad_input で往復していた）
+ */
+export const INPUT_BOUNDS = {
+  /** queries・urls・1つの主張の cite の長さ */
+  listMax: 8,
+  exclusionsMax: 16,
+  /** 1回の verify の主張の数 */
+  claimsMax: 50,
+  /** next・steer の waitMs。超えた分は丸める */
+  waitMsMax: POLICY.deadlines.nextMaxWaitMs,
+  /** start の maxPassages。種類の上限より大きい値は丸める */
+  maxPassagesMax: Math.max(POLICY.modes.lookup.passagesPerBundle, POLICY.modes.survey.passagesPerBundle),
+  /** around の before・after。超えた分は丸める */
+  aroundMax: POLICY.around.maxEach,
+  /** find の limit。超えた分は丸める */
+  findLimitMax: POLICY.find.maxResults,
+  /** find の語句の長さ（抜き書きの上限と同じ） */
+  findTextMaxChars: LIMITS.excerptMaxChars,
+  /** find の source（sourceId か URL）の長さ */
+  sourceMaxChars: 2_000,
 } as const;
 
 /** 止めるときにモデルへ返す理由（ツールのエラーとして返る） */
@@ -320,7 +344,7 @@ export function isPreferred(host: string): boolean {
  *   いつ使うか        → スキル ai-research-first の説明文（plugins/ai-research）
  *   手順・API・書き方 → CODE_TOOL_DESCRIPTION（ここ）
  *   経路外の書き方    → ROUTE_DENY_REASON / ROUTE_ALLOW_CONTEXT（フックがその場で返す）
- * サーバーの説明文は、code の道具を指すだけにする。大きさは test/budget.test.ts で上限を守る。
+ * サーバーの説明文は、code の道具を指すだけにする。大きさは scripts/check-budget.mjs で上限を守る。
  */
 export const INSTRUCTIONS = `ai-research は利用者専用の調査の道具（出典つきの台帳つき）です。調べものには code の道具を使い、手順と API はその説明文に従ってください。`;
 
@@ -340,7 +364,13 @@ export const CODE_TOOL_DESCRIPTION = `${PROCEDURE}
 
 ## 使える API（TypeScript）
 \`\`\`ts
-${SANDBOX_TYPES}
+${sandboxTypes({
+  waitMsMax: INPUT_BOUNDS.waitMsMax,
+  startMs: { lookup: POLICY.modes.lookup.startMs, survey: POLICY.modes.survey.startMs },
+  maxPassages: { lookup: POLICY.modes.lookup.passagesPerBundle, survey: POLICY.modes.survey.passagesPerBundle },
+  aroundMax: INPUT_BOUNDS.aroundMax,
+  findLimitMax: INPUT_BOUNDS.findLimitMax,
+})}
 \`\`\`
 
 コードは async の arrow function。要る項目だけ return する（fetch は使えない）。`;

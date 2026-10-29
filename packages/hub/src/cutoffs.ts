@@ -1,11 +1,13 @@
 import type { Cutoff } from "@ai-research/sandbox-api";
+import type { TraceOrigin } from "@ai-research/core";
 
 /**
  * 打ち切りの見せ方（制約 v0.7 Q-04、設計 v1.3 §8.1）。純粋な関数。
  * 答えに影響しうるもの（利用者が示した URL、台帳の候補の照らし直し、検索そのもの）は1件ずつ。
  * 検索で見つけたページの取得の失敗は、まとめて件数で1件にする。まとめても URL は残す（経路外で読むため。設計 v1.4 §8.2.4）。
  */
-export type CutoffOrigin = "url" | "ledger" | "search" | "system";
+/** 出典を何から取ったか。記録（trace）の origin と同じ1つの定義 */
+export type CutoffOrigin = TraceOrigin;
 export type CutoffItem = { cutoff: Cutoff; origin: CutoffOrigin };
 
 export function presentCutoffs(items: CutoffItem[]): Cutoff[] {
