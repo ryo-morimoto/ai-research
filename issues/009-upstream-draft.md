@@ -4,7 +4,7 @@
 
 ---
 
-**Title:** `pkspec-adapter-vitest discover` aborts (SIGABRT) when a test file combines an unused `fast-check` import with a raw surrogate-pair literal
+**Title:** `pkspec-adapter-vitest discover` aborts (SIGABRT) on test files containing raw surrogate-pair (emoji) literals — content/offset sensitive
 
 **Body:**
 
@@ -29,18 +29,18 @@ describe("記録の整形（例）", () => {
 
 Bisect results (each change applied alone to the file above):
 
-| change | discover |
-| --- | --- |
-| as above | **SIGABRT** (deterministic, 3/3) |
-| remove the unused `import fc from "fast-check"` | OK |
-| keep the import but use it (`void fc;`) | OK |
-| replace the raw emoji literals with `"\u{1F600}"` escapes | OK |
-| raw emoji in a top-level `it` without the fc import | OK |
-| Japanese describe/it names without the emoji | OK |
-| same crashing file on vitest 5.0.5 | **SIGABRT** |
-| escaped variant on vitest 5.0.5 | OK |
+| change | vitest 4.1.12 | vitest 5.0.5 |
+| --- | --- | --- |
+| as above | **SIGABRT** (deterministic) | **SIGABRT** |
+| replace the fc import with a **same-byte-length comment** | (not tested) | **SIGABRT** |
+| remove that line entirely | OK | **SIGABRT** |
+| add a short `//x` comment line before the emoji | (not tested) | **SIGABRT** |
+| keep the import but use it (`void fc;`) | OK | (not tested) |
+| replace the raw emoji literals with `"\u{1F600}"` escapes | OK | OK |
+| raw emoji in a top-level `it`, minimal file | OK | (not tested) |
+| Japanese describe/it names without the emoji | OK | (not tested) |
 
-So the crash needs the combination of (a) an **unused** `fast-check` default import and (b) a **raw surrogate-pair literal** inside a `describe`-scoped test body. `run --manifest` works fine on the same project; only `discover` aborts.
+So `fast-check` itself is irrelevant (a same-length comment reproduces it). The one necessary ingredient is a **raw surrogate-pair literal** in the file; whether it crashes flips with small changes to the surrounding content and with the vitest version, which suggests the abort depends on the **byte/char offset of the surrogate pair** in some intermediate the shim processes (string slicing at a surrogate boundary?). Escaping the literal always avoids it. `run --manifest` works fine on the same project; only `discover` aborts.
 
 Environment: Linux x86_64 (Arch, kernel 7.2.11), Node 22 / 26, vitest 4.1.12 and 5.0.5, fast-check 4.10.2, pkspec@0.4.2 binaries from the release tarball (sha256 verified).
 
