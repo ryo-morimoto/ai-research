@@ -59,6 +59,12 @@ created: 2026-10-30
 
 ## 次の一手
 
+- **上流に報告済み（2026-10-31、利用者の了承の上で投稿）**：https://github.com/mizchi/pkspec/issues/42
+  以後は上流の対応を待つ。直ったら core/test/trace.test.ts の絵文字を生リテラルに戻し、
+  tools/pkspec/ の vendoring を更新する。
+
+（以下は報告前の記録）
+
 - **リポジトリ側は回避済み（2026-10-30）**：core/test/trace.test.ts の絵文字リテラルをエスケープ表記
   （`"\u{1F600}"`）に変えた（検査の意味は同じ）。これで core の discover が通り、
   `pkspec adapter --dry-run` が本体 CLI で全スイート解決（lint:constraints に組み込み済み）。
