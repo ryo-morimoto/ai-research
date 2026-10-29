@@ -6,8 +6,9 @@ import type { Env } from "./env.ts";
 import { ledgerStub } from "./ledger.ts";
 import { runStub } from "./run.ts";
 import { routeStub } from "./route.ts";
-import { AroundOpts, FindInput, FindOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, clampMax, hubError, parse, runNotFound } from "./boundary.ts";
-import { INPUT_BOUNDS } from "@ai-research/policy";
+import { AroundOpts, FindInput, FindOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, clampList, clampMax, hubError, parse, runNotFound } from "./boundary.ts";
+import { INPUT_BOUNDS, VERIFY_NEXT } from "@ai-research/policy";
+import type { VerifyResult } from "@ai-research/sandbox-api";
 import { emit } from "./obs.ts";
 
 /**
@@ -65,6 +66,12 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
       if (w !== undefined) input.waitMs = w;
       const p = clampMax(notices, "maxPassages", mode.passagesPerBundle, input.maxPassages);
       if (p !== undefined) input.maxPassages = p;
+      const ql = clampList(notices, "queries", INPUT_BOUNDS.listMax, input.queries);
+      if (ql) input.queries = ql;
+      const ul = clampList(notices, "urls", INPUT_BOUNDS.listMax, input.urls);
+      if (ul) input.urls = ul;
+      const xl = clampList(notices, "exclusions", INPUT_BOUNDS.exclusionsMax, input.exclusions);
+      if (xl) input.exclusions = xl;
       const runId = `run_${crypto.randomUUID()}`;
       await routeStub(env).noteResearchStart().catch(() => {});
       return withNotices((await runStub(env, runId).start(runId, input, client)) as Bundle, notices);
@@ -97,15 +104,28 @@ export function providers(env: Env, client?: string): ResolvedProvider[] {
     verify: guarded(async (runId: unknown, claims: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
       const c = parse(ClaimsInput, claims ?? [], "claims") as ClaimInput[];
-      return notFound(await runStub(env, id).verify(c), id);
+      // 上限を超えた主張は弾かず、先頭だけ照合して残りは budget の未照合で返す（issue 002、VERIFY_NEXT.budget）
+      const notices: Notice[] = [];
+      const head = clampList(notices, "claims", INPUT_BOUNDS.claimsMax, c) ?? c;
+      const r = (await runStub(env, id).verify(head)) as VerifyResult;
+      if (c.length > head.length) {
+        r.statuses = [
+          ...r.statuses,
+          ...c.slice(head.length).map((_, i) => ({ index: head.length + i, status: "未照合" as const, reason: "budget" as const, next: VERIFY_NEXT.budget })),
+        ];
+      }
+      return notFound(withNotices(r, notices), id);
     }, firstArg),
     steer: guarded(async (runId: unknown, q: unknown) => {
       const id = parse(RunIdInput, runId, "runId");
       const input = parse(SteerInput, q, "steer");
       const notices: Notice[] = [];
       const waitMs = clampMax(notices, "waitMs", INPUT_BOUNDS.waitMsMax, input.waitMs);
-      const q2: { question: string; queries: string[]; urls?: string[]; sources?: ("web" | "scholarly")[]; waitMs?: number } = { question: input.question, queries: input.queries ?? [] };
-      if (input.urls) q2.urls = input.urls;
+      const q2: { question: string; queries: string[]; urls?: string[]; sources?: ("web" | "scholarly")[]; waitMs?: number } = {
+        question: input.question,
+        queries: clampList(notices, "queries", INPUT_BOUNDS.listMax, input.queries) ?? [],
+      };
+      if (input.urls) q2.urls = clampList(notices, "urls", INPUT_BOUNDS.listMax, input.urls) ?? input.urls;
       if (input.sources) q2.sources = input.sources;
       if (waitMs !== undefined) q2.waitMs = waitMs;
       return notFound(withNotices((await runStub(env, id).steer(q2)) as Bundle, notices), id);

@@ -89,6 +89,29 @@ describe("API の約束（設計 v1.5 §8.3.7）", () => {
     expect(v.statuses[1].next).toContain("passageId");
   });
 
+  it("件数の上限を超えたリストは先頭だけ使い、clamped で知らせる（bad_input にしない。issue 002）", async () => {
+    const { research } = fns();
+    const b = await research.start!({
+      question: "プロンプトキャッシュの前置き",
+      mode: "survey",
+      queries: Array.from({ length: 12 }, (_, i) => `q${i}`),
+    });
+    expect(b.error).toBeUndefined();
+    expect(b.notices).toEqual(expect.arrayContaining([{ kind: "clamped", field: "queries", max: 8 }]));
+  });
+
+  it("verify の主張が50件を超えたら、先頭だけ照合し、残りは budget の未照合で返す（issue 002）", async () => {
+    const { research } = fns();
+    const b = await research.start!({ question: "プロンプトキャッシュの前置き", mode: "lookup", urls: ["https://docs.example.com/cache"] });
+    const claims = Array.from({ length: 52 }, () => ({ text: "a", cite: [] }));
+    const v = await research.verify!(b.runId, claims);
+    expect(v.error).toBeUndefined();
+    expect(v.statuses).toHaveLength(52);
+    expect(v.statuses[51]).toMatchObject({ index: 51, status: "未照合", reason: "budget" });
+    expect(v.statuses[51].next).toContain("未照合");
+    expect(v.notices).toEqual(expect.arrayContaining([{ kind: "clamped", field: "claims", max: 50 }]));
+  });
+
   it("束は軽い：問いの文を繰り返さず、URL と同じ locator を省き、maxPassages で段落を絞れる", async () => {
     const { research } = fns();
     const b = await research.start!({ question: "取得先の制限とキャッシュ", mode: "survey", queries: ["limits", "cache"], maxPassages: 2 });

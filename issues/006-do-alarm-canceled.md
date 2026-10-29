@@ -28,3 +28,7 @@ created: 2026-10-29
 
 - どの DO のアラームかを特定する(`$workers.entrypoint` で group-by)。
 - 特定できたら、その処理が冪等か(中断→再実行で壊れないか)を確認する。冪等なら優先度を下げてよい。
+
+## 対応（2026-10-30、docs/06 の設計に基づく実装）
+
+entrypoint を特定するクエリを runbook §4.2 に定義。RunDO/TraceDO の alarm は冪等（put の上書き・transactionSync）と確認済み。

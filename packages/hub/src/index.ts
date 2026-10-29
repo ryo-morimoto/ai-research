@@ -31,6 +31,11 @@ const defaultHandler = {
     if (url.pathname === "/") {
       return new Response("ai-research hub. MCP endpoint: /mcp\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     }
+    // クローラ由来の 404 を集計から消す（issue 008）。利用者向けの内容はないので全拒否
+    if (url.pathname === "/robots.txt") {
+      return new Response("User-agent: *\nDisallow: /\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+    if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
     return new Response("Not Found", { status: 404 });
   },
 };

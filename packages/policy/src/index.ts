@@ -385,6 +385,7 @@ ${sandboxTypes({
   maxPassages: { lookup: POLICY.modes.lookup.passagesPerBundle, survey: POLICY.modes.survey.passagesPerBundle },
   aroundMax: INPUT_BOUNDS.aroundMax,
   findLimitMax: INPUT_BOUNDS.findLimitMax,
+  claimsMax: INPUT_BOUNDS.claimsMax,
 })}
 \`\`\`
 

@@ -189,6 +189,8 @@ export type SandboxBounds = {
   aroundMax: number;
   /** find が返す段落の上限 */
   findLimitMax: number;
+  /** 1回の verify の主張の数。超えた分は照合せず budget の未照合で返る */
+  claimsMax: number;
 };
 
 /** モデルが読む型定義。道具の説明文に埋め込む。上限値は方針（policy）から渡す */
@@ -216,7 +218,7 @@ declare const research: {
   next(runId: string, opts?: { waitMs?: number }): Promise<Bundle | HubError>;   // waitMs は ${sec(b.waitMsMax)}まで（超えた分は丸める）
   around(runId: string, passageId: string, opts?: { before?: ${range}; after?: ${range} }): Extra;
   find(runId: string, sourceIdOrUrl: string, text: string, opts?: { limit?: number }): Extra;   // limit は ${b.findLimitMax} まで
-  verify(runId: string, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<{ statuses: Status[] } | HubError>;
+  verify(runId: string, claims: { text: string; cite: { passageId: string; quote: string }[] }[]): Promise<{ statuses: Status[] } | HubError>;  // ≤${b.claimsMax}件
   steer(runId: string, q: Q): Promise<Bundle | HubError>;
   deepen(runId: string): Promise<Bundle | HubError>;
   help(): Promise<{ procedure: string; description: string }>;   // 今の手順と型

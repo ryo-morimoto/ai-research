@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { INPUT_BOUNDS as B, offPath } from "@ai-research/policy";
 import type { ClaimInput, HubError, HubErrorCode, Notice, QuestionInput } from "@ai-research/sandbox-api";
+import { emit } from "./obs.ts";
 
 /**
  * 実行環境（会話の Claude が書いたコード）とハブの境界（設計 v1.3 D12、制約 P-05）。
@@ -11,7 +12,8 @@ import type { ClaimInput, HubError, HubErrorCode, Notice, QuestionInput } from "
  */
 
 const str = z.string().trim().min(1);
-const strList = z.array(z.string()).max(B.listMax).optional();
+/** 件数の上限も丸める（clampList）。ここでは拒まない */
+const strList = z.array(z.string()).optional();
 /** 上限は丸める（clampMax）。ここでは拒まない */
 const waitMs = z.number().min(0).optional();
 
@@ -24,20 +26,21 @@ export const StartInput = z.object({
   waitMs,
   maxPassages: z.number().int().min(1).optional(),
   scope: z.string().optional(),
-  exclusions: z.array(z.string()).max(B.exclusionsMax).optional(),
+  exclusions: z.array(z.string()).optional(),
   queries: strList,
-  urls: z.array(z.string().url()).max(B.listMax).optional(),
+  urls: z.array(z.string().url()).optional(),
 });
 export const SteerInput = z.object({
   question: str,
   queries: strList,
-  urls: z.array(z.string().url()).max(B.listMax).optional(),
+  urls: z.array(z.string().url()).optional(),
   sources: sourceSet,
   waitMs,
 });
-export const ClaimsInput = z
-  .array(z.object({ text: z.string(), cite: z.array(z.object({ passageId: z.string(), quote: z.string() })).max(B.listMax) }))
-  .max(B.claimsMax);
+/** 主張の数の上限（claimsMax）も丸める。超えた分は照合せず budget の未照合で返す（sandbox.ts） */
+export const ClaimsInput = z.array(
+  z.object({ text: z.string(), cite: z.array(z.object({ passageId: z.string(), quote: z.string() })).max(B.listMax) }),
+);
 export const RunIdInput = z.string().regex(/^run_[A-Za-z0-9-]{8,80}$/);
 export const NextOpts = z.object({ waitMs }).optional();
 export const PassageIdInput = z.string().regex(/^[ph]\d{1,9}$/);
@@ -52,12 +55,37 @@ export function clampMax(notices: Notice[], field: string, max: number, v: numbe
   return max;
 }
 
+/** 件数の上限を超えたリストは先頭だけ使い、clamped で知らせる */
+export function clampList<T>(notices: Notice[], field: string, max: number, v: T[] | undefined): T[] | undefined {
+  if (!v || v.length <= max) return v;
+  notices.push({ kind: "clamped", field, max });
+  return v.slice(0, max);
+}
+
 export class BadInput extends Error {}
+
+/** 本文になり得るキー。実引数ログには値を入れず長さだけ残す（C-04、E-01） */
+const SENSITIVE_KEYS = new Set(["question", "text", "quote", "scope", "excerpt"]);
+
+/** bad_input の切り分け用に、渡された値の形だけを文字列にする（issue 002：型違いの実態が分からなかった） */
+export function describeArgs(value: unknown): string {
+  try {
+    const s = JSON.stringify(value, (key, v) => {
+      if (typeof v === "string" && (SENSITIVE_KEYS.has(key) || v.length > 40)) return `<string ${v.length}字>`;
+      if (typeof v === "function") return "<function>";
+      return v;
+    });
+    return (s ?? String(typeof value)).slice(0, 120);
+  } catch {
+    return String(typeof value);
+  }
+}
 
 export function parse<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
   const r = schema.safeParse(value);
   if (!r.success) {
     const issues = r.error.issues.slice(0, 3).map((i) => `${[what, ...i.path].join(".")}: ${i.message}`);
+    emit({ event: "bad_input", what, issues: issues.join("; ").slice(0, 300), args: describeArgs(value) });
     throw new BadInput(issues.join("; "));
   }
   return r.data;

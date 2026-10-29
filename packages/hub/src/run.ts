@@ -217,9 +217,11 @@ export class RunDO extends DurableObject<Env> {
       const { task, source, passage, hit, trace } = this.counters;
       this.meta.counters = { task, source, passage, hit, trace };
       const meta = this.meta;
-      await timed("run.save.meta", () => this.ctx.storage.put("meta", meta));
+      await timed("run.save.meta", () => this.ctx.storage.put("meta", meta), { sizeOf: () => JSON.stringify(meta).length });
     }
-    await timed("run.save.events", () => this.ctx.storage.put("events", this.events.slice(-MAX_EVENTS)));
+    // 単一キーの全量書き換え（docs/06 R3）。遅かったときは量も残し、律速と確認できたらチャンク分割する
+    const events = this.events.slice(-MAX_EVENTS);
+    await timed("run.save.events", () => this.ctx.storage.put("events", events), { sizeOf: () => JSON.stringify(events).length, countOf: () => events.length });
   }
 
   private log(type: string, data: Record<string, unknown> = {}): void {
@@ -249,7 +251,9 @@ export class RunDO extends DurableObject<Env> {
           while (this.traceBuf.length) {
             const batch = this.traceBuf.splice(0, POLICY.trace.flushBatch);
             try {
-              await traceStub(this.env).append(JSON.stringify(batch));
+              // TraceDO は obs に依存できない（V-01）ので、所要はこちら側で測る（issue 004 の前兆計測。RPC 込み）
+              const json = JSON.stringify(batch);
+              await timed("trace.append", () => traceStub(this.env).append(json), { sizeOf: () => json.length, countOf: () => batch.length });
             } catch (e) {
               this.traceDropped += batch.length;
               emit({ event: "trace_dropped", n: batch.length, total: this.traceDropped, error: String(e).slice(0, 200) });

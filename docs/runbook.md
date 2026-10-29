@@ -189,6 +189,27 @@ Instructions for Claude に足す1行：
 - その場で見るなら `npx wrangler tail ai-research`。`cf` はまだ記録を流せない [5]。
 - 1つの調査の経過は RunDO の実行記録（events）に残る。束を返したとき・作業の開始と終了・方向の変更・照合の記録で、不変条件の検査（docs/adr/archive/03 §3.3）にもそのまま使える。
 
+ログの事象（`event` の値）は `packages/hub/src/obs.ts` の union が正。ここにない形の行は出ない。
+
+#### 異常終了の見張りクエリ（issues/005・006）
+
+Workers Observability の Telemetry query で使う。保存クエリとして登録しておく。
+
+- **異常終了の見張り**：`GET /mcp` の `canceled` は SSE の正常切断（クライアントの切断。wallTime 中央値37秒）なので除外する。
+  ```
+  $workers.outcome != "ok"
+    AND NOT ($workers.requestMethod = "GET" AND $workers.requestPath = "/mcp" AND $workers.outcome = "canceled")
+  ```
+  これで残るのは本当の異常（`exceededWallTime`、DO のリセットなど。issue 004 系）だけになる。
+- **アラームの canceled の切り分け**（issue 006）：どの DO のアラームかを特定する。
+  ```
+  $workers.outcome = "canceled" AND $workers.triggerType = "alarm"
+    | group by $workers.entrypoint
+  ```
+  RunDO / TraceDO なら、alarm は冪等（put の上書き・transactionSync 内で完結）なので再実行で壊れない。継続して増えなければ優先度を下げてよい。
+- **境界の失敗の内訳**（issue 002 の再観測）：`event = "bad_input"` を `what` で group-by。clamp 化後は型・形の誤りだけが残るはず（目安：35件/30日 → 1桁/30日）。
+- **遅いストレージの前兆**（issue 004）：`event = "slow_storage"` を `label` で group-by し、`ms`・`bytes` の分布を見る。`run.save.events` が律速と確認できたら docs/06 R3 第2段（チャンク分割）に進む。
+
 ### 4.3 費用の目安の見方
 
 - 1回の調査が使うトークンは束の `budget.usedTokens` に出る。段階ごとの上限は `POLICY.caps`（最初 10万、続き 60万、深掘り 140万）。
