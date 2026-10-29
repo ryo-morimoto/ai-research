@@ -8,13 +8,16 @@
 
 ## 文書
 
+地図は [docs/README.md](docs/README.md)。定義は「正・注釈・ビュー」に分かれる（[docs/adr/0001](docs/adr/0001-definition-management.md)）。
+
 | 文書 | 中身 |
 |---|---|
-| [docs/01-requirements-and-constraints.md](docs/01-requirements-and-constraints.md) | やりたいことと制約（v0.9） |
-| [docs/02-architecture.md](docs/02-architecture.md) | アーキテクチャと設計（v1.5） |
-| [docs/03-detailed-design-and-verification.md](docs/03-detailed-design-and-verification.md) | 詳細設計と検証方法（stage2）。Known Unknowns の確認結果と、結合試験で見つかったこと（§4） |
-| [docs/04-deploy-and-operations.md](docs/04-deploy-and-operations.md) | デプロイ、claude.ai への登録、運用、試験の動かし方 |
-| [docs/05-trace-and-view.md](docs/05-trace-and-view.md) | 調査の記録と見える化（v0.3）。要件・制約・設計の要約、記録（TraceDO）と会話の中の View、実機での確認の手順 |
+| [docs/product.md](docs/product.md) | やりたいこと・成功の物差し・制約どうしの緊張関係 |
+| [spec/constraints.ts](spec/constraints.ts) | **制約の台帳（正）**：全 ID・強さ・検査への参照。`pnpm check` が照合する |
+| [docs/generated/SPEC.md](docs/generated/SPEC.md) | 制約の一覧（生成物） / [coverage.md](docs/generated/coverage.md) は未検査の棚卸し |
+| [docs/design/](docs/design/architecture.md) | 部品ごとの設計（現在形）：architecture・run・ledger・gateway・route・trace-view |
+| [docs/runbook.md](docs/runbook.md) | デプロイ、claude.ai への登録、運用、試験の動かし方 |
+| [docs/adr/](docs/adr/0001-definition-management.md) | 決定の記録。`archive/` に旧 01〜05 の全文（経緯） |
 
 ## 構成
 
@@ -24,13 +27,14 @@ packages/policy       版つきの方針（取得先ごとの制限、上限値�
 packages/hub          Worker：MCP の入口と OAuth、RunDO・LedgerDO・HostLimiterDO・RouteDO・TraceDO、取得の出口。test/ に workerd 上の結合試験
 packages/sandbox-api  code mode でモデルに見せる型
 packages/view         会話の中の View（MCP Apps の1枚の HTML。何にも依存しない）
+spec                  制約の台帳（constraints.ts。正）
 specs                 Quint の仕様（台帳、1つの調査、頻度制限）とわざと壊した版
 bench                 計測（試験用の依頼セット、呼び出し器。M3）
 ```
 
 ## 状態
 
-Cloudflare にデプロイし、claude.ai のカスタムコネクタとプラグインから使っている。設計 v1.5（進行中と喪失の区別、段落が選ばれない出典の find、論文の PDF と公開の版、拒まれたときの冷却、フックの送るものの最小化と版の検知、結果のラベル）まで実装した。計測は [docs/02](docs/02-architecture.md) §8.1.6・§8.2.9・§8.3.10。
+Cloudflare にデプロイし、claude.ai のカスタムコネクタとプラグインから使っている。設計 v1.5（進行中と喪失の区別、段落が選ばれない出典の find、論文の PDF と公開の版、拒まれたときの冷却、フックの送るものの最小化と版の検知、結果のラベル）まで実装した。計測は [docs/adr/archive/02](docs/adr/archive/02-architecture.md) §8.1.6・§8.2.9・§8.3.10。
 
 - 論文・研究の知見は `sources: ["scholarly", "web"]` で、Europe PMC・Crossref・OpenAlex・Semantic Scholar から書誌と抄録を引き、公開の版（PDF を含む）があれば本文も読む。出版社のページが拒んだら URL の DOI に回る
 - 結果のラベルは「引用確認済・種類」「書誌のみ」「未照合」「背景知識」「経路外（理由）」。表すのは引用が原文にあるかだけで、主張の正しさではない
@@ -38,9 +42,9 @@ Cloudflare にデプロイし、claude.ai のカスタムコネクタとプラ�
 
 ## 使い方（claude.ai のアカウントに3つ登録する）
 
-1. カスタムコネクタ：`https://ai-research.ryo-morimoto-dev.workers.dev/mcp`（docs/04 §3）
+1. カスタムコネクタ：`https://ai-research.ryo-morimoto-dev.workers.dev/mcp`（docs/runbook.md §3）
 2. プラグイン：Customize > Plugins > Add > Add marketplace で `ryo-morimoto/ai-research` を追加し、`ai-research` を入れる
-3. Instructions for Claude に1行（docs/04 §3.1）
+3. Instructions for Claude に1行（docs/runbook.md §3.1）
 
 ## 開発
 

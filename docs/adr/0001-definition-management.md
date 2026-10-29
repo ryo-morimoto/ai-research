@@ -1,6 +1,13 @@
-# 06 意図・制約の定義管理 v0.2 — docs の再構成を含む理想形
+# ADR-0001 意図・制約の定義管理 v1.0 — docs の再構成を含む理想形と、その適用
 
-2026-10-29。v0.1 からの変更：(1) 外部調査（mizchi/pkspec、moinsen-dev/speckit-xref、useblocks/sphinx-needs ほか）を反映し、自作レジスト リ案を撤回。(2)「docs の現構造は維持する」という前提を外し、docs 自体の再構成を提案の中心に据えた。
+2026-10-29。v0.1 からの変更：(1) 外部調査（mizchi/pkspec、moinsen-dev/speckit-xref、useblocks/sphinx-needs ほか）を反映し、自作レジストリ案を撤回。(2)「docs の現構造は維持する」という前提を外し、docs 自体の再構成を提案の中心に据えた。v1.0：適用した（§適用の記録）。
+
+## 適用の記録（2026-10-29）
+
+- **M1（pkspec 導入試験）は環境の制約で不成立**：インストールスクリプト（外部コードの実行）がこの環境の権限で止められた。計画どおり撤退線を使い、**データは pkspec 互換の形のまま、検査は自作の薄い mjs** に切り替えた。データ（ID・強さ・文・検査参照）は `spec/constraints.ts` にあり、pkspec を使える環境になれば Spec.pkl へ機械的に移せる。
+- **M2（済）**：`spec/constraints.ts`（Goal 9 件・制約 72 件）＋ `scripts/check-constraints.mjs`。検査の内容：承認済みの MUST に機械検査（ID の grep かファイルの実在）があるか／宣言した grep の空振り／孤児の ID／`docs/generated/` のビューが台帳と一致するか。`pnpm check` に `lint:constraints` と `spec:check` を組み込んだ。CI で判定できない運用系の MUST（P-03・Q-05 など）は `verifiedOutsideRepo` として coverage に列挙する（draft への偽装をしないため）。
+- **M3（済）**：docs を再編した。旧 01・02・03・05 は `docs/adr/archive/` に凍結（コードコメントの「docs/02 §8.3.2」はそこを指す）。現在形の設計は `docs/design/`、目的と緊張関係は `docs/product.md`、運用は `docs/runbook.md`、地図は `docs/README.md`。旧 docs/01 §2・docs/05 §2 の制約表と docs/03 §3.5〜3.6 の対応表は削除し、生成物（`docs/generated/`）に置き換えた。
+- **残り（任意）**：弱い検査（ファイルの実在のみ）の ID タグ付与、S-02・S-03（draft）の検査整備、Q-01 のラベル一元化、PolicySchema、ObsEvent。coverage.md が常に列挙する。
 
 ## 0. 診断 — 今の docs はなぜ読みにくいか
 

@@ -2,7 +2,7 @@
 
 版 0.3（実装 v0.1 に対応。Cloudflare CLI `cf` でデプロイし、動作を確かめた）
 
-この文書は、ハブを自分の Cloudflare アカウントに置き、claude.ai から使えるようにするまでの手順と、日々の運用をまとめる。設計は docs/02、詳細設計と検証は docs/03 を見る。
+この文書は、ハブを自分の Cloudflare アカウントに置き、claude.ai から使えるようにするまでの手順と、日々の運用をまとめる。設計は docs/design/、制約と検査の一覧は docs/generated/ を見る（旧 docs/02・03 の全文は docs/adr/archive/）。
 
 ---
 
@@ -152,7 +152,7 @@ claude.ai のカスタムコネクタとしても接続できた（2026-10-24、
 
 ### 3.1 頼まなくても ai-research を使わせる
 
-設計は docs/02 §7.4〜7.8（制約 v0.6 の U-03・Q-07）。登録はアカウントに3つだけで、各機械では何もしない。
+設計は docs/design/route.md（U-03・Q-07。経緯は docs/adr/archive/02 §7.4〜7.8）。登録はアカウントに3つだけで、各機械では何もしない。
 
 | 登録するもの | 状態 |
 |---|---|
@@ -166,7 +166,7 @@ Instructions for Claude に足す1行：
 * 調べもの・事実確認・最新情報の確認には、ウェブ検索（web_search / web_fetch）ではなく ai-research コネクタの code を使う。ai-research が使えないときだけウェブ検索に戻し、結果に「経路外」と理由を書く
 ```
 
-プラグインの中身と、フックがハブに送るものは `plugins/ai-research/README.md` にある。経路の計数は MCP の道具 `route_stats` で見られる。Claude Code での確認結果は docs/02 §7.6 の末尾。
+プラグインの中身と、フックがハブに送るものは `plugins/ai-research/README.md` にある。経路の計数は MCP の道具 `route_stats` で見られる。Claude Code での確認結果は docs/adr/archive/02 §7.6 の末尾。
 
 ハブの道具の説明文（`packages/policy` の `INSTRUCTIONS`）にも同じ方針を書いてあるが、説明文だけでは足りなかった（2026-10-24 の作業の会話で、説明文が読み込まれていても組み込みのウェブ検索が使われた）。
 
@@ -187,7 +187,7 @@ Instructions for Claude に足す1行：
 
 - observability を有効にしてある。Cloudflare のダッシュボードの Workers > ai-research > Logs で見る。
 - その場で見るなら `npx wrangler tail ai-research`。`cf` はまだ記録を流せない [5]。
-- 1つの調査の経過は RunDO の実行記録（events）に残る。束を返したとき・作業の開始と終了・方向の変更・照合の記録で、不変条件の検査（docs/03 §3.3）にもそのまま使える。
+- 1つの調査の経過は RunDO の実行記録（events）に残る。束を返したとき・作業の開始と終了・方向の変更・照合の記録で、不変条件の検査（docs/adr/archive/03 §3.3）にもそのまま使える。
 
 ### 4.3 費用の目安の見方
 
