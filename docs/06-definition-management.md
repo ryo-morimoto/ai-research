@@ -1,137 +1,145 @@
-# 06 意図・制約の定義管理（理想形の提案） v0.1
+# 06 意図・制約の定義管理 v0.2 — docs の再構成を含む理想形
 
-2026-10-29。knowledge:「意図を書くための仕様・制約の記述手段」（2026-10-26）の6層をこのリポジトリに割り付け、定義管理の到達点と移行順を決める。
+2026-10-29。v0.1 からの変更：(1) 外部調査（mizchi/pkspec、moinsen-dev/speckit-xref、useblocks/sphinx-needs ほか）を反映し、自作レジスト リ案を撤回。(2)「docs の現構造は維持する」という前提を外し、docs 自体の再構成を提案の中心に据えた。
 
-## 0. 原則
+## 0. 診断 — 今の docs はなぜ読みにくいか
 
-仕様が正。実装は仕様側の検査で受け入れる（SDD [40][41]）。そのために、すべての定義を次の4つの性質に寄せる。
+1. **番号＝執筆順で、読者の問いと軸が合っていない。** 「C-01 は何に守られているか」「run の仕様はどこか」に一発で答える場所がなく、01（制約表）→ 03（検証戦略）→ 05（view の制約と対応表）→ テスト名、と渡り歩く必要がある。
+2. **同じ事実の写しが4か所にある。** docs/01 の表、docs/05 §の対応表、テスト名の ID タグ、run.ts の INV コメント。写しは必ずどれかが腐る。docs/03 §2.3 の漂流（古い状態ラベル、cutoff 理由の欠落）は人の怠慢ではなく構造の帰結。
+3. **判定されるべき事実が散文に埋まっている。** 設計文書は v1.3→v1.6 の追記で地層化し（§8.1〜§8.4）、「今の仕様」を知るには歴史を読み通すしかない。
+4. **ID 体系（W/S/P/Q/U/E/R/V/C/INV）に地図がない。** 接頭辞の意味がどこにも一覧されていない。
 
-1. **宣言は1か所**：同じ値・同じ語彙を2か所に書かない。
-2. **参照は導出**：他の場所が要るときは、正から計算して埋める（手で写さない）。
-3. **判定は機械**：制約には「何が検査するか」が必ず付く。文型・スキーマ・テスト・モデル検査・計測のどれか。
-4. **判定できない MUST は CI で目立つ**：未検査の制約は「ない」のではなく「未検査」と列挙される。
+原因はすべて同じ：**人が読む文書に、機械が照合すべき事実を書いている**こと。
 
-現状の主な違反（issues/002、docs/03 §2.3 の漂流、Q-01 のラベル散在、wrangler.jsonc と cloudflare.config.ts の手動同期）は、すべて 1〜2 の違反が原因。3〜4 の仕組みがないため、違反してもすぐには気づけなかった。
+## 1. 原則 — 「正・注釈・ビュー」の三分離
 
-## 1. 層の割り付け
+> The build is the oracle, not grep or regex. — useblocks/spec-kit-preset-useblocks-vmodel
 
-| 層（knowledge） | このリポジトリでの正 | 判定 | 現状とのギャップ |
+| 区分 | 中身 | 形式 | 変更のされ方 |
 |---|---|---|---|
-| 0 目的 | docs/01 §1（散文のまま） | 制約の `serves` で参照される | リンクなし |
-| 1 要件文 | **specs/constraints.yaml（新設）**：W-/S-/P-/Q-/U-/E-/R-/V-/C-/INV- | scripts/check-constraints.mjs（新設） | docs の表×テスト名×コメントの三重管理 |
-| 2 定量目標 | POLICY.slo（新設、Planguage の Scale/Meter/Goal [9][10]） | bench/ とログ分析（フィットネス関数 [13]） | 【要計測】が放置可能 |
-| 3 設計 | specs/*.qnt（既存の Quint） | spec:check を **pnpm check に組み込む** | 任意実行のまま |
-| 4 コード | 境界の Zod（契約 [24]）、fast-check（性質 [29]）、型の強制 | typecheck・test（既存） | 上限の直書き（P1 で解消） |
-| 5 ルール・データ | packages/policy の POLICY | **PolicySchema（新設）** で parse | POLICY 自身は無検査 |
+| **正** | 目的（Goal）、制約（Scenario）、検査への参照、数値目標 | データ（機械可読） | 編集すると CI が整合を検査 |
+| **注釈** | 理由・経緯・トレードオフ・却下した代替案 | 散文（ADR、追記型） | 追記のみ。書き直さない |
+| **ビュー** | 制約一覧表、制約→検査の対応、カバレッジ、未検査の列挙 | 生成物 | **手書き禁止**。CI が再生成・照合 |
 
-形式手法を増やす範囲は knowledge の推奨どおり「間違えると高くつく部分」だけに絞る：並行（RunDO=済・Quint）、台帳への追記（LedgerDO）、経路の判断（RouteDO）。View・文言・整形はテストで十分。全面の TLA+/Dafny 化はしない。
+v0.1 の4原則（宣言は1か所・参照は導出・判定は機械・未検査の MUST は列挙される）はこの三分離の系になる。
 
-## 2. L1：制約レジストリ（最優先）
+## 2. 道具の選定 — 調査結果と決定
 
-docs/01 の制約表・docs/05 の「制約→試験」対応表・テスト名の `[C-01]`・run.ts の INV コメントは、同じ事実の4つの写し。正を1つにする。
+要件「制約 ID ↔ 検査の照合を CI で」を満たす既製品は2系統あった（調査 2026-10-29、GitHub README 直接取得）。
 
-```yaml
-# specs/constraints.yaml（抜粋）
-- id: C-01
-  layer: view
-  strength: MUST
-  statement: "モデルに見せるのは openTool だけとする"   # EARS 風 [4]：条件＋主体＋義務
-  serves: [Q-05]
-  checks:
-    - test: "packages/hub/test/mcp.test.ts :: C-01"
-- id: INV-8
-  layer: run
-  strength: MUST
-  statement: "締め切りで終わっていなかった現在の版の作業は、その束の cutoffs に必ず現れる"
-  checks:
-    - spec: "specs/run.qnt#INV-8"
-    - test: "packages/hub/test/run.test.ts :: INV-8"
-- id: S-05
-  strength: SHOULD
-  statement: "…"
-  checks: []            # ← check-constraints が「未検査の制約」として列挙する
-```
+| 候補 | 強み | このリポジトリとの適合 | 判定 |
+|---|---|---|---|
+| **mizchi/pkspec** | Goal/Scenario/specRef の常設グラフ、`check`（実装テストのない spec で exit 1）、`orphans`、`coverage`、`docs` 生成、decision log | 常設の不変条件が主のこのリポジトリに語彙がそのまま合う。vitest は adapter+overlay で接続 | **採用** |
+| moinsen-dev/speckit-xref | `@spec` アンカー、xref.json、漂流測定、GitHub Action | feature/変更単位が前提（Spec Kit の specs/NNN- 形）。常設制約の台帳には軸違い | 見送り（変更フローを導入するとき再考） |
+| useblocks/sphinx-needs | 最成熟。trace graph を `sphinx-build -W` が検証 | Python+Sphinx 一式が pnpm/TS リポジトリに重い | 見送り |
+| 自作（YAML+mjs） | 最小・依存ゼロ | 車輪の再発明（v0.1 案） | **フォールバック** |
 
-`scripts/check-constraints.mjs` が CI で検査する：
+**pkspec の弱点と撤退線**：experimental（v0.4、API 変動中）、Pkl CLI＋バイナリ依存。これは「正はデータ、道具は差し替え可能」で受ける — Spec.pkl が持つのは ID・強度・文・検査参照だけなので、pkspec が使えなくなっても同じデータを数十行の mjs で検査し直せる。移行コストは一方向（道具→道具）で、文書構造には跳ねない。
 
-1. **MUST で checks が空なら FAIL**（期限つき waiver でのみ猶予）。SHOULD は警告として列挙。
-2. **checks の参照先が実在する**：`test:` はテスト名の grep、`spec:` は qnt 内の定義、`bench:`/`measure:` はスクリプトの存在。
-3. **docs の表はレジストリから生成**（または照合）。docs/03 §2.3 のような漂流は、生成に切り替えた時点で起きなくなる。
-4. 逆引き：テスト名にある ID がレジストリにない場合も FAIL（孤児の検出）。
-
-これで「S-05 に試験がない」「【要計測】が1年放置」が、人の記憶ではなく CI の出力になる。NASA FRET [5] の思想（制限言語＋検査への変換）の軽量版であり、新しい言語は導入しない。
-
-## 3. L5：POLICY のスキーマ化と導出の固定
-
-**POLICY 自身に Zod スキーマを与える**（JSON Schema 系 [36][39]）。構造だけでなく、値の間の不変条件を書く：
-
-- `backoff.minMs <= defaultMs <= maxMs`
-- `routing.cutoffAllowReasons ⊆ CUTOFF_REASONS`（P1 で satisfies により型レベルで実施済み）
-- `relevance.minCoverage ∈ (0,1)`、`modes.*.passagesPerBundle <= limits.passagesPerBundle`
-- `deadlines.nextMaxWaitMs < leaseWaitMs` のような順序関係
-
-CUE の「制約の単一化で矛盾を検出する」[33] と同じ効果を、既存依存（Zod）だけで得る。テストで `PolicySchema.parse(POLICY)` を回し、procedureVersion（内容ハッシュ）に versioned なまま載せる。
-
-**導出の向きを固定する**（P1 で実施済み、このブランチ）：
+## 3. 目標構造
 
 ```
-POLICY（正）
-  → INPUT_BOUNDS（境界の上限）
-      → boundary.ts の Zod（受け入れ契約）
-      → sandboxTypes(bounds)（モデルが読む型定義の文）
+README.md                 … リポジトリの入口（現状どおり）
+docs/
+  README.md               … 地図：何がどこにあるか、ID 接頭辞の意味、読み順（1ページ厳守）
+  product.md              … 目的と価値、やらないこと（旧 docs/01 §1。Goal の散文版）
+  runbook.md              … 運用（旧 docs/04）
+  design/                 … ドメイン別の設計散文（旧 docs/02・03・05 を再編・現在形に書き直し）
+    run.md ledger.md route.md trace-view.md gateway.md
+  adr/                    … 理由・経緯・トレードオフ（追記型。設計文書の「版の地層」はここに移す）
+    0001-....md
+  generated/              … ビュー（CI が生成。手書き禁止、レビュー対象外）
+    SPEC.md coverage.md
+spec/                     … 正（機械可読）
+  Spec.pkl                … Goal と Scenario（全制約 ID）。下記 §4
+  Test.pkl / Adapter.pkl  … vitest・mjs チェッカー・qnt への接続
+specs/*.qnt               … 形式仕様（現状どおり。Scenario の checks から参照される）
+issues/                   … 現状どおり（観測/仮説/次の一手）＋漂流分類の語彙を追加（§6）
 ```
 
-残りの二重化も同じ型で解消する：
+- **docs/01〜05 の番号付き文書は廃止。** 旧 01 §2〜（制約表）→ spec/Spec.pkl へ。旧 03・05 の対応表 → 生成物へ。散文は design/（現在形）と adr/（経緯）に分配。
+- **設計散文は「現在形」で書き直す。**「v1.4 で〜に変えた」は adr/ に移し、design/ には今の仕組みだけを書く。
+- 生成物は docs/generated/ に隔離し、diff レビューの対象から外す（CI が照合する）。
 
-- **wrangler.jsonc と cloudflare.config.ts**：cloudflare.config.ts を正にして wrangler.jsonc を生成（スクリプト＋照合チェック）。手動同期のコメントを消す。
-- **Env**：Zod スキーマ化。`SEARCH_PROVIDER` は `z.enum(["brave","tavily","none"])`、`TEST_*` の `Number()` 黙殺フォールバックは起動時の1か所に集約。`readHookInput` の `as HookInput` も Zod で置換（境界は P-05 の対象）。
-- **版の比較**：`compareVersions`（check-budget.mjs）と `pluginOutdated`（route.ts）を1つに。
-- **Q-01 のラベル**：「経路外（…）」「引用確認済…」の語彙を `LABELS` として policy に1か所定義し、ROUTE_DENY_REASON・ROUTE_ALLOW_CONTEXT・EMPTY_NEXT・boundary の NEXT・SKILL.md はテンプレートで参照。check-budget に「ラベル文字列の直書き禁止」の placement 検査を足す。これで Q-01（ラベル一覧は1か所）が初めて機械判定になる。
+## 4. spec/ の中身 — 正の形
 
-## 4. L4：契約の規約と検査の置き換え
+既存 ID は**維持する**（テスト名・qnt・コメントに根を張っており、改名は漂流だけ生む）。各 Scenario に domain と serves を付け、接頭辞の意味は docs/README.md の地図に一覧する。
 
-- **境界の受け入れ規約を明文化**（P1 で実装済み）：型・形の誤りだけ bad_input で拒む。直し方が自明な数値の超過は丸めて `clamped` で知らせる（設計 v1.5 §8.3.7 の一般化）。issue 002 の 30 日 35 件のうち waitMs 13・maxPassages 2・around 16 件相当がこの規約で消える。
-- **性質ベーステスト [29] の対象を広げる**：`sanitizeTraceEvent` の冪等性、`clampMax` の単調性、`presentCutoffs` が URL を失わないこと。fast-check は導入済みなので追加コストは小さい。
-- **regex 検査を構造的検査に置き換える**：check-deps.mjs の import 規則は dependency-cruiser（公式の依存グラフ検査）へ。`VerifiedExcerpt` の生成特権は、regex ではなく branded type ＋ コンストラクタ非公開のモジュール設計で型が強制する（regex は防御の2枚目に降格）。動的 import の見逃しがなくなる。
+```pkl
+// spec/Spec.pkl（抜粋。実 ID）
+goals {
+  new Goal { id = "GOAL-VERIFIED-CITES"; name = "答えの根拠は原文と照合済みの引用である"; priority = 90 }
+  new Goal { id = "GOAL-SINGLE-PATH";    name = "どの機械・会話からでも同じ手順・同じ結果"; priority = 80 }
+}
 
-## 5. L2：定量目標と観測の形式化（issues 001–008 の根本対応）
+scenarios {
+  new {
+    id = "C-01"; name = "モデルに見せるのは openTool だけ"
+    severity = "critical"; reviewStatus = "approved"
+    contributes { "GOAL-SINGLE-PATH" }
+    tags { "spec"; "domain:view"; "strength:MUST" }
+    // 検査は Test.pkl / overlay が specRef "C-01" で指す（mcp.test.ts の既存テスト）
+  }
+  new {
+    id = "INV-8"; name = "締め切りで終わっていない現在の版の作業は、束の cutoffs に必ず現れる"
+    severity = "critical"; reviewStatus = "approved"
+    contributes { "GOAL-VERIFIED-CITES" }
+    tags { "spec"; "domain:run"; "strength:MUST" }
+    implementedAt { "specs/run.qnt" }          // 形式仕様＋壊した変種
+  }
+  new {
+    id = "S-05"; name = "束1回の大きさは目標トークン内に収まる"
+    severity = "major"; reviewStatus = "draft"  // draft の間は check が落とさない。
+    tags { "spec"; "domain:budget"; "strength:SHOULD"; "measure:bench" }
+    openQuestions { "Scale と Meter が未定（【要計測】の正体）。bench/ のどれを Meter にするか" }
+  }
+}
+```
 
-issues/ の 8 件のうち 001・003・004・005 は「観測が場当たり」という同じ原因を持つ。ログを仕様にする：
+- **強度の対応**：MUST は `severity = critical/major` ＋ `reviewStatus = approved` とし、`pkspec check` が「実装テストのない approved spec → exit 1」で落とす。未計測の目標は draft のまま `openQuestions` に残す — 「未検査の MUST が列挙される」が `pkspec next`/`coverage` そのものになる。
+- **検査の接続**：vitest は Adapter の overlay で既存テスト名（`[C-01]` タグ）に specRef を付ける。specs/*.qnt・scripts/check-*.mjs・bench/ は `implementedAt` で指し、`check --strict` がパスの実在を検査する。
+- **定量目標（旧【要計測】）**：Scenario の記述に Planguage の Scale/Meter/Goal を書き、Meter を bench/ またはログ集計スクリプトにする。POLICY.slo（v0.1 §5）はこの Scenario から導出する。
+- **決定の記録**：仕様に関わる決定は Scenario の `decisions`（追記型）へ。文書全体に関わる決定だけ adr/ に書く。
 
-1. **ObsEvent（Zod union）を1つ定義**：`code_error`・`hub_error`・`slow_storage`・`trace_dropped`・`mcp_bad_request`（issue 003 の 400 に理由を付ける）…。`console.log(JSON.stringify(...))` の直書き（sandbox.ts・run.ts・obs.ts）を `obs.emit()` に集約し、スキーマ外の事象はテストで落ちる。
-2. **目標を Planguage で書く** [9][10]。POLICY.slo に版つきで持つ：
+POLICY（packages/policy）は引き続き**実行時の値の正**。Spec.pkl は「何を守るか」、POLICY は「いくつで守るか」を持ち、両者の整合（例：INPUT_BOUNDS が POLICY から導出されている）は既存の型検査と PolicySchema（v0.1 §3、継続）が担う。
 
-   | 目標 | Scale（単位） | Meter（測り方） | Tolerable / Goal |
-   |---|---|---|---|
-   | 境界の検証失敗率 | bad_input ÷ code 呼び出し | Cloudflare logs 30日 | ≤1% / ≤0.1% |
-   | 束の初回応答 | p95 ms（W-01） | trace の run.started→bundle | 25s / 15s |
-   | 記録の欠落 | trace_dropped ÷ 事象数（C-03） | obs 集計 | ≤0.1% / 0 |
+## 5. CI の最終形
 
-3. **Meter を自動化**：bench/ と、ログを引いて SLO と突き合わせるスクリプト（OpenSLO の YAML 化 [12] は Cloudflare 側の集計が揃ってからでよい）。これはアーキテクチャのフィットネス関数 [13][14] に当たる。issue 002 型の問題は、次からは SLO 違反として検知される。
+```
+pnpm check =
+  pkspec check --strict   … approved spec に生きた検査があるか、implementedAt が実在するか
+  pkspec orphans          … specRef のないテスト（タグ漏れ）
+  pkspec lint             … 壊れた参照・廃止 spec への参照
+  spec:check (Quint)      … 形式仕様＋壊した変種（既存。check に組み込む）
+  lint:deps / lint:budget … 置き場所と大きさ（既存 mjs。pkspec の守備範囲外なので残す）
+  typecheck / test        … 既存
+docs 生成 = pkspec docs / coverage → docs/generated/（CI が再生成し、差分があれば落とす）
+```
 
-## 6. L3：設計検証の運用化
+## 6. 漂流の扱い
 
-- `spec:check` を `pnpm check` に入れる（壊した仕様を検出する broken variants の仕組みは既にあるので、残りは実行の義務化だけ）。
-- INV-n はレジストリに登録し、run.ts のコメントは ID の参照だけにする（本文の重複をやめる）。
-- 新規の形式化は RouteDO（会話ごとの明示・cutoff の TTL つき状態）を候補とする。権限・経路の判断は「間違えると高くつく」側で、かつ状態機械なので P/Quint 向き [18]。
+docs/03 型の漂流は「対応表を人が直す」のではなく、(a) 表を生成物にして消滅させ、(b) それでも起きるずれ（仕様・コード・形式モデル間）は issues/ のテンプレに **drift 分類**（spec-drift / code-drift / model-drift / harness-drift / decision-drift / coverage-gap、mizchi/skills formal-methods-drift-guard の語彙）を足して起票する。「プロパティを黙って弱めて green にしない」を issues/README.md に明記する。
 
 ## 7. 移行計画
 
-| 段 | 内容 | 規模 |
+| 段 | 内容 | 出口条件 |
 |---|---|---|
-| P1（済・このブランチ） | INPUT_BOUNDS 単一正、丸め＋clamped の統一、sandboxTypes 導出、trace SCHEMA 一元化（REQUIRED 導出・型との一致強制・trace() の型付け）、CutoffOrigin=TraceOrigin | 8 files |
-| P2 | constraints.yaml ＋ check-constraints.mjs、docs の表を生成に、spec:check を check へ | 中 |
-| P3 | PolicySchema、ObsEvent ＋ obs.emit 集約、Env/hook 入力の Zod 化、POLICY.slo | 中 |
-| P4 | dependency-cruiser 置換、wrangler.jsonc 生成、LABELS 一元化（Q-01 の機械判定）、compareVersions 統一 | 中 |
+| M0（済） | INPUT_BOUNDS 単一正・clamp 統一・trace SCHEMA 一元化（ブランチ 30bd830） | check green |
+| M1 | pkspec 導入試験：C-01・INV-8・S-05 など5件を Spec.pkl 化、vitest overlay 接続、`pkspec check` をローカルで通す | 5件で check/orphans が意図どおり動く。動かなければフォールバック（自作 mjs）に切替えて M2 へ |
+| M2 | 全 ID 移行（旧 01 §2 表・旧 05 表 → Spec.pkl）、`pnpm check` へ組込み、docs/generated/ 生成開始 | 旧対応表の削除。未検査 MUST が coverage に列挙される |
+| M3 | docs 再編：design/（現在形に書き直し）・adr/（地層の移設）・README 地図。旧 01〜05 を削除 | docs/ 直下は README・product・runbook・design/・adr/・generated/ のみ |
 
-P2 が要（かなめ）。レジストリができると、P3・P4 の各項目は「checks が空の制約」として CI に列挙され、進捗そのものが機械判定になる。
+M1 が関門。pkspec の experimental リスクはここで実測し、ダメなら**データ（ID・文・参照）はそのまま**で検査だけ自作に切り替える。
 
 ## 8. 入れないもの
 
-- 全面の TLA+/Alloy/Dafny 化・証明（費用対効果が合わない。knowledge の推奨どおり核心のみ）。
-- docs の散文の廃止。理由・経緯・トレードオフ（docs/01 §4）は散文が正のまま。レジストリに入るのは判定される事実だけ。
-- 新しい仕様言語の導入（EARS/FRET の思想は使うが、記法は今の日本語の要件文＋YAML に留める）。
+- 既存 ID の改名（接頭辞の意味は地図で解決する）。
+- 全面の形式検証・証明（高くつく核心のみ。現状の Quint＋壊した変種を維持し、追加候補は RouteDO だけ）。
+- 散文の廃止。理由・経緯は人の文章が正のまま。ただし置き場所は adr/ に固定する。
+- Spec Kit / OpenSpec 型の「変更提案フロー」の導入（個人リポジトリには過剰。必要になったら speckit-xref を再評価）。
 
-## 出典
+## 9. 出典
 
-番号は knowledge:「意図を書くための仕様・制約の記述手段」（2026-10-26）の出典一覧に対応する。
+- mizchi/pkspec・uneffect・skills（formal-methods-drift-guard / reconciler）・formal-methods-playground — GitHub README（2026-10-29 取得）
+- moinsen-dev/speckit-xref、leocamello/spec-kit-v-model、useblocks/spec-kit-preset-useblocks-vmodel — 同上
+- knowledge:「意図を書くための仕様・制約の記述手段」（2026-10-26）— 層の割り付け・Planguage・SLO・フィットネス関数の出典番号はそちらに対応
