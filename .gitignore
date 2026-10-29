@@ -13,3 +13,4 @@ bench/results/
 *.secrets.env
 __pycache__/
 spec/.pkspec/
+tools/pkspec/bin/

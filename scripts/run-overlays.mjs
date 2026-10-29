@@ -11,13 +11,31 @@
  *
  * 実行：node scripts/run-overlays.mjs   （PKSPEC_ADAPTER_VITEST でシムの場所を上書きできる）
  */
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const root = join(new URL(".", import.meta.url).pathname, "..");
-const shim = process.env.PKSPEC_ADAPTER_VITEST || "pkspec-adapter-vitest";
+
+// シムの解決：PKSPEC_ADAPTER_VITEST → PATH → リポジトリの vendoring（check-constraints.mjs と同じ）
+function resolveShim() {
+  for (const cand of [process.env.PKSPEC_ADAPTER_VITEST, "pkspec-adapter-vitest"]) {
+    if (!cand) continue;
+    if (!spawnSync(cand, ["--help"], { encoding: "utf8" }).error) return cand;
+  }
+  const dir = join(root, "tools/pkspec");
+  const local = join(dir, "bin/pkspec-adapter-vitest");
+  if (!existsSync(local)) {
+    const v = spawnSync("sha256sum", ["-c", "pkspec-linux-amd64.tar.gz.sha256"], { cwd: dir, encoding: "utf8" });
+    if (v.status !== 0) throw new Error("tools/pkspec の tarball が sha256 と合わない");
+    spawnSync("mkdir", ["-p", join(dir, "bin")]);
+    const x = spawnSync("tar", ["xzf", "pkspec-linux-amd64.tar.gz", "-C", "bin"], { cwd: dir, encoding: "utf8" });
+    if (x.status !== 0) throw new Error(`tools/pkspec の展開に失敗: ${x.stderr}`);
+  }
+  return local;
+}
+const shim = resolveShim();
 
 const adapter = readFileSync(join(root, "spec/Adapter.pkl"), "utf8");
 const suites = { hub: { dir: "packages/hub", keys: [], discoverable: true }, core: { dir: "packages/core", keys: [], discoverable: false } };

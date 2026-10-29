@@ -7,10 +7,10 @@
 - **M1（pkspec 導入試験）は実施済み（spec/pkspec-trial/）**：当初は外部コードの実行が権限で止まり、撤退線（データは pkspec 互換のまま、検査は自作の薄い mjs）を先に実装した。利用者が実行を許可した後、pkspec@0.4.2（sha256 照合済みの公式 tarball）で完走：5件の Spec.pkl 化、`pkspec check` green、壊した変種で exit 1、exec 5/5、coverage 100%。vitest overlay（Adapter.pkl）は4鍵を同梱シムの discover の実ケース ID と照合して一致を確かめ、`pkspec-adapter-vitest run --manifest` で**4ケースすべて実行して passed**（core は discover がコアダンプ、run は動く）。当初の判定は「constraints.ts ＋ mjs を維持」だったが、下記の決定で上書きされた。
 - **決定（2026-10-30、利用者）：「正を constraints.ts のままにする二重管理は意味がない。pkspec だけで良い」— pkspec を唯一の正として全面移行した。**
   - 正は `spec/Spec.pkl`（Goal 9・制約 72。強さ・持ち場・ops は tags）。実装ポインタは `spec/Test.pkl`、vitest への接続は `spec/Adapter.pkl`、スキーマは `spec/pkl/`（pkspec@0.4.2 から vendoring）。
-  - `spec/constraints.ts`・自作の照合ロジック・併走用の生成スクリプトは削除。`scripts/check-constraints.mjs` は pkspec の実行役（check＋exec＋孤児検出＋ビュー生成）に書き換え、**pkspec を必須の検査器**にした（PATH か PKSPEC_BIN。未導入なら `pnpm check` は落ちる）。
+  - `spec/constraints.ts`・自作の照合ロジック・併走用の生成スクリプトは削除。`scripts/check-constraints.mjs` は pkspec の実行役（check＋exec＋孤児検出＋ビュー生成）に書き換え、**pkspec を必須の検査器**にした。公式 tarball（sha256 つき）を `tools/pkspec/` に vendoring し、PATH にないときは照合して自動展開するので、**素の環境でも `pnpm check` が通る**（linux-amd64。他は PATH / PKSPEC_BIN）。
   - 移行時の全件実測：`pkspec check` 72 件 green、`pkspec exec` 72/72 passed、孤児 0。overlay は `scripts/run-overlays.mjs` が discover の実 ID と照合して実行し 4/4 passed（core の discover は issues/009 の上流不具合のため run のみ）。
   - 試験ディレクトリ spec/pkspec-trial は役目を終えて削除（利用者の指示）。M1 の証跡はこの節と git 履歴（コミット e63982e〜a7bb5ea）にある。
-  - 残る依存：pkspec は experimental（v0.4.2）。CLI の変動と issues/009 は上流に追随する。各機械への導入は利用者の chezmoi で行う（エージェントからの ~/.local/bin への配置は権限で不可だった）。
+  - 残る依存：pkspec は experimental（v0.4.2）。CLI の変動と issues/009 は上流に追随する。PATH への導入（chezmoi）は任意になった：リポジトリの vendoring が既定で効く（~/.local/bin への配置はエージェント権限で不可だったため、この形にした）。
 - **M2（済）**：`spec/constraints.ts`（Goal 9 件・制約 72 件）＋ `scripts/check-constraints.mjs`。検査の内容：承認済みの MUST に機械検査（ID の grep かファイルの実在）があるか／宣言した grep の空振り／孤児の ID／`docs/generated/` のビューが台帳と一致するか。`pnpm check` に `lint:constraints` と `spec:check` を組み込んだ。CI で判定できない運用系の MUST（P-03・Q-05 など）は `verifiedOutsideRepo` として coverage に列挙する（draft への偽装をしないため）。
 - **M3（済）**：docs を再編した。旧 01・02・03・05 は `docs/adr/archive/` に凍結（コードコメントの「docs/02 §8.3.2」はそこを指す）。現在形の設計は `docs/design/`、目的と緊張関係は `docs/product.md`、運用は `docs/runbook.md`、地図は `docs/README.md`。旧 docs/01 §2・docs/05 §2 の制約表と docs/03 §3.5〜3.6 の対応表は削除し、生成物（`docs/generated/`）に置き換えた。
 - **P3・P4 相当（済、2026-10-29 同日）**：

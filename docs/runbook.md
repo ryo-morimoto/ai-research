@@ -200,7 +200,7 @@ Instructions for Claude に足す1行：
 
 | 何を | コマンド | 中身 |
 |---|---|---|
-| 全部（CI と同じ） | `pnpm check` | 依存の規則、説明の大きさとラベル、**制約の台帳（spec/Spec.pkl）の pkspec 照合とビュー生成の一致**、Quint、型、core の単体・性質ベーステスト、hub の結合試験。**pkspec が PATH（か PKSPEC_BIN）に要る**（[mizchi/pkspec](https://github.com/mizchi/pkspec) の install.sh。導入は chezmoi に入れる） |
+| 全部（CI と同じ） | `pnpm check` | 依存の規則、説明の大きさとラベル、**制約の台帳（spec/Spec.pkl）の pkspec 照合とビュー生成の一致**、Quint、型、core の単体・性質ベーステスト、hub の結合試験。pkspec は **リポジトリに vendoring 済み**（tools/pkspec/ の公式 tarball を sha256 照合して自動展開。linux-amd64）。PATH か PKSPEC_BIN にあればそちらを優先。他のプラットフォームは [mizchi/pkspec](https://github.com/mizchi/pkspec) の install.sh |
 | 制約の編集後 | `pnpm constraints:write` | spec/Spec.pkl・Test.pkl から docs/generated/ を生成し直す |
 | overlay（vitest 接続）の照合と実行 | `node scripts/run-overlays.mjs` | spec/Adapter.pkl の鍵を discover の実 ID と照合し、シムで実行する |
 | 性質ベーステストを多く | `FC_RUNS=20000 pnpm --filter @ai-research/core test` | 失敗したら出力の seed を `FC_SEED` に入れて再現する |

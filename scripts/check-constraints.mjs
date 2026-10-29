@@ -20,13 +20,38 @@ const specDir = join(root, "spec");
 const mode = process.argv.includes("--check") ? "check" : "write";
 const errors = [];
 
-// ---- pkspec（必須の検査器） ---------------------------------------------------
+// ---- pkspec（必須の検査器）の解決 ----------------------------------------------
+// 順に、PKSPEC_BIN → PATH → リポジトリに vendoring した tarball（tools/pkspec/。
+// sha256 を照合してから tools/pkspec/bin/ に展開する。linux-amd64 のみ。
+// 他のプラットフォームは install.sh で PATH に入れる（docs/runbook.md）
 
-const bin = process.env.PKSPEC_BIN || "pkspec";
+function resolvePkspec() {
+  for (const cand of [process.env.PKSPEC_BIN, "pkspec"]) {
+    if (!cand) continue;
+    if (!spawnSync(cand, ["version"], { encoding: "utf8" }).error) return cand;
+  }
+  const dir = join(root, "tools/pkspec");
+  const local = join(dir, "bin/pkspec");
+  if (!existsSync(local)) {
+    const v = spawnSync("sha256sum", ["-c", "pkspec-linux-amd64.tar.gz.sha256"], { cwd: dir, encoding: "utf8" });
+    if (v.status !== 0) {
+      console.error("FAIL tools/pkspec の tarball が sha256 と合わない");
+      process.exit(1);
+    }
+    mkdirSync(join(dir, "bin"), { recursive: true });
+    const x = spawnSync("tar", ["xzf", "pkspec-linux-amd64.tar.gz", "-C", "bin"], { cwd: dir, encoding: "utf8" });
+    if (x.status !== 0) {
+      console.error(`FAIL tools/pkspec の展開に失敗: ${x.stderr}`);
+      process.exit(1);
+    }
+  }
+  return local;
+}
+
+const bin = resolvePkspec();
 const probe = spawnSync(bin, ["version"], { encoding: "utf8" });
 if (probe.error) {
-  console.error("FAIL pkspec が見つからない（PATH か PKSPEC_BIN）。正（spec/Spec.pkl）の検査器は pkspec。");
-  console.error("     導入：https://github.com/mizchi/pkspec の install.sh（docs/runbook.md）");
+  console.error("FAIL pkspec を実行できない（PKSPEC_BIN / PATH / tools/pkspec のどれでも）。導入は docs/runbook.md");
   process.exit(1);
 }
 
