@@ -135,7 +135,7 @@ describe("View", () => {
     expect(v.sent.filter((m) => m.method === "tools/call").length).toBe(before + 1);
   });
 
-  it("C-09：取得した文字列は文字として出す（要素にならない）", async () => {
+  it("C-09・E-03：取得した文字列は文字（データ）として出す（要素にならない。中の指示に従う経路がない）", async () => {
     const v = boot();
     await initialized(v);
     const evil = '<img src=x onerror="alert(1)"><script>alert(2)</script>';

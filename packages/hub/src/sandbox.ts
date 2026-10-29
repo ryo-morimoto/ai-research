@@ -8,6 +8,7 @@ import { runStub } from "./run.ts";
 import { routeStub } from "./route.ts";
 import { AroundOpts, FindInput, FindOpts, ClaimsInput, NextOpts, PassageIdInput, RunIdInput, StartInput, SteerInput, clampMax, hubError, parse, runNotFound } from "./boundary.ts";
 import { INPUT_BOUNDS } from "@ai-research/policy";
+import { emit } from "./obs.ts";
 
 /**
  * code mode の実行環境に渡す関数（docs/03 §2.3）。
@@ -23,7 +24,7 @@ function guarded(fn: (...args: unknown[]) => Promise<unknown>, runIdOf?: (args: 
       return await fn(...args);
     } catch (e) {
       const runId = runIdOf?.(args);
-      console.log(JSON.stringify({ event: "hub_error", message: String((e as Error)?.message ?? e).slice(0, 300), runId }));
+      emit({ event: "hub_error", message: String((e as Error)?.message ?? e).slice(0, 300), ...(typeof runId === "string" ? { runId } : {}) });
       return hubError(e, typeof runId === "string" && /^run_/.test(runId) ? runId : undefined);
     }
   };

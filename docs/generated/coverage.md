@@ -3,7 +3,7 @@
 手で編集しない（scripts/check-constraints.mjs が生成）。
 
 - 登録: 72 件（MUST/MUST NOT 68、SHOULD 4）
-- 機械検査あり: 60 / 72。運用で確かめる: 8。draft: 2
+- 機械検査あり: 61 / 72。運用で確かめる: 8。draft: 0
 
 ## 機械検査がない approved（本来ここは空であるべき）
 
@@ -23,37 +23,22 @@
 | U-01 | manual: 点検表：新しい機械で行う作業が0件（登録手順は docs/runbook.md） |
 | E-04 | manual: 送信内容の記録（outbound_log）の点検 |
 | V-06 | manual: TraceDO は1人に1つ（設計で満たす）。実機確認済 2026-10-26 |
-| V-07 | manual: 実機確認済（2026-10-26）<br>file: packages/view/test/view.test.ts（幅 375px の描画試験） |
+| V-07 | manual: 実機確認済（2026-10-26。幅 375px の描画は headless Chromium の手元確認） |
 | C-07 | manual: 点検表 |
 
 ## draft（検査が未整備。approved に上げるには機械検査が要る）
 
 | ID | 問い |
 |---|---|
-| S-02 | 機械検査がない。RunDO の状態保持の試験に ID を付けるか、bench に入れてから approved にする |
-| S-03 | 機械検査がない。gateway の経路選択の試験に ID を付けてから approved にする |
 
 ## 弱い検査（ファイルの実在のみ。ID タグを付ければ grep に上げられる）
 
 | ID | 対象 |
 |---|---|
-| W-02 | packages/hub/test/run.test.ts |
-| W-03 | packages/hub/test/ledger.test.ts |
-| S-01 | packages/core/test/properties.test.ts |
 | S-05 | bench/run_cases.py |
-| P-01 | packages/hub/test/run.test.ts、specs/run.qnt |
-| P-02 | packages/hub/test/gateway.test.ts |
-| Q-01 | packages/core/test/properties.test.ts |
-| Q-03 | scripts/check-deps.mjs、specs/ledger.qnt |
-| U-02 | packages/hub/test/ledger.test.ts |
-| E-02 | specs/limiter.qnt |
-| E-03 | packages/view/test/view.test.ts |
+| P-01 | specs/run.qnt |
+| Q-03 | specs/ledger.qnt |
 | E-05 | plugins/ai-research/README.md |
-| R-01 | packages/core/test/properties.test.ts |
-| V-07 | packages/view/test/view.test.ts |
-| V-09 | packages/hub/test/tracedo.test.ts |
-| C-05 | packages/hub/test/mcp.test.ts |
-| INV-5 | packages/hub/test/run.test.ts |
 
 ## 計測が要るもの（measure）
 
@@ -62,7 +47,7 @@
 | W-01 | bench: 最初の結果まで P95 60秒 |
 | W-03 | 2台試験 |
 | S-01 | ステップ数に対する時間の推移 |
-| S-02 | 休憩後の最初の応答時間 |
+| S-02 | 休憩後の最初の応答時間（時間そのものは bench で測る） |
 | S-03 | 出典種別ごとの取得時間 |
 | S-04 | 依頼の種類ごとの応答開始時間 |
 | S-05 | 長い会話と新しい会話の差 10秒以内【要計測】 |
@@ -75,7 +60,4 @@
 
 | ID | 問い |
 |---|---|
-| S-02 | 機械検査がない。RunDO の状態保持の試験に ID を付けるか、bench に入れてから approved にする
-| S-03 | 機械検査がない。gateway の経路選択の試験に ID を付けてから approved にする
 | S-05 | 目標値 10秒の妥当性は未計測。テストに S-05 の ID タグがない
-| Q-01 | 「経路外（…）」等のラベル文字列はまだ複数箇所に直書き（policy の LABELS への一元化は未実施）

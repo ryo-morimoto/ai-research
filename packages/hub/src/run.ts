@@ -78,7 +78,7 @@ import { workUrl } from "./scholarly.ts";
 import { ledgerStub, type LedgerRecord } from "./ledger.ts";
 import { routeStub, urlKey } from "./route.ts";
 import { deadlines, timeScale } from "./time.ts";
-import { timed } from "./obs.ts";
+import { emit, timed } from "./obs.ts";
 import { presentCutoffs, type CutoffItem, type CutoffOrigin } from "./cutoffs.ts";
 import { traceStub } from "./trace.ts";
 
@@ -252,7 +252,7 @@ export class RunDO extends DurableObject<Env> {
               await traceStub(this.env).append(JSON.stringify(batch));
             } catch (e) {
               this.traceDropped += batch.length;
-              console.log(JSON.stringify({ event: "trace_dropped", n: batch.length, total: this.traceDropped, error: String(e).slice(0, 200) }));
+              emit({ event: "trace_dropped", n: batch.length, total: this.traceDropped, error: String(e).slice(0, 200) });
             }
           }
         } finally {

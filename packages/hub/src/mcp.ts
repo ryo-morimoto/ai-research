@@ -9,6 +9,7 @@ import { ledgerStub } from "./ledger.ts";
 import { routeStub } from "./route.ts";
 import { traceStub } from "./trace.ts";
 import { providers, makeExecutor } from "./sandbox.ts";
+import { emit } from "./obs.ts";
 
 const MAX_RESULT_CHARS = 60_000;
 
@@ -43,7 +44,11 @@ export function buildServer(env: Env, opts: { executor?: Executor; client?: stri
     },
     async ({ code }) => {
       const r = await executor.execute(code, providers(env, opts.client));
-      if (r.error) return { ...text({ error: r.error, logs: r.logs ?? [] }), isError: true };
+      if (r.error) {
+        // code の失敗を1行残す（issue 001：isError だけでは観測に出なかった）
+        emit({ event: "code_error", message: String(r.error).slice(0, 300) });
+        return { ...text({ error: r.error, logs: r.logs ?? [] }), isError: true };
+      }
       return text(r.logs && r.logs.length ? { result: r.result, logs: r.logs } : r.result);
     },
   );

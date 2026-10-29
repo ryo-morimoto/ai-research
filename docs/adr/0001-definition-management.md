@@ -7,7 +7,13 @@
 - **M1（pkspec 導入試験）は環境の制約で不成立**：インストールスクリプト（外部コードの実行）がこの環境の権限で止められた。計画どおり撤退線を使い、**データは pkspec 互換の形のまま、検査は自作の薄い mjs** に切り替えた。データ（ID・強さ・文・検査参照）は `spec/constraints.ts` にあり、pkspec を使える環境になれば Spec.pkl へ機械的に移せる。
 - **M2（済）**：`spec/constraints.ts`（Goal 9 件・制約 72 件）＋ `scripts/check-constraints.mjs`。検査の内容：承認済みの MUST に機械検査（ID の grep かファイルの実在）があるか／宣言した grep の空振り／孤児の ID／`docs/generated/` のビューが台帳と一致するか。`pnpm check` に `lint:constraints` と `spec:check` を組み込んだ。CI で判定できない運用系の MUST（P-03・Q-05 など）は `verifiedOutsideRepo` として coverage に列挙する（draft への偽装をしないため）。
 - **M3（済）**：docs を再編した。旧 01・02・03・05 は `docs/adr/archive/` に凍結（コードコメントの「docs/02 §8.3.2」はそこを指す）。現在形の設計は `docs/design/`、目的と緊張関係は `docs/product.md`、運用は `docs/runbook.md`、地図は `docs/README.md`。旧 docs/01 §2・docs/05 §2 の制約表と docs/03 §3.5〜3.6 の対応表は削除し、生成物（`docs/generated/`）に置き換えた。
-- **残り（任意）**：弱い検査（ファイルの実在のみ）の ID タグ付与、S-02・S-03（draft）の検査整備、Q-01 のラベル一元化、PolicySchema、ObsEvent。coverage.md が常に列挙する。
+- **P3・P4 相当（済、2026-10-29 同日）**：
+  - 弱い検査の ID タグ付与：既存テスト・仕様の見出しに ID を足し、grep 検査へ格上げ（弱い検査は 12 → 4 件。残りは bench の道具・モデルファイル・README の表で、タグの置き場がないもの）。S-02・S-03 も該当テストにタグを付けて approved に。
+  - **Q-01 のラベル一元化**：policy に `OFF_PATH_REASONS`（経路外の理由の一覧）を置き、ROUTE_DENY_REASON・ROUTE_ALLOW_CONTEXT・EMPTY_NEXT・boundary の NEXT を導出に変えた。check-budget が「一覧にない経路外ラベルの直書き」を packages・plugins 全体で落とす。
+  - **PolicySchema**：hub のテスト（test/policy.test.ts）で POLICY を Zod で parse し、値の間の不変条件（backoff の順序、締め切りの順序、modes ≤ limits、tierWeight の順序、cutoffAllowReasons ⊆ CUTOFF_REASONS、VERIFY_NEXT = CLAIM_REASONS、INPUT_BOUNDS の導出）を検査。
+  - **ObsEvent**：観測の事象を obs.ts の1つの union に宣言し、`emit()` に集約（hub_error・code_error・slow_storage・trace_dropped）。code の失敗の記録（issue 001）もここで足した。
+- **できなかったこと（利用者の判断待ち）**：pkspec 本体の導入試験。外部コードの実行（インストールスクリプト・バイナリ）がこの環境の権限で拒否される。試すには利用者が手元で `curl -fsSL https://raw.githubusercontent.com/mizchi/pkspec/main/install.sh | sh` を実行する。データ（constraints.ts）は pkspec 互換のまま。
+- **環境の注意**：/tmp（tmpfs）のクォータ超過時、workerd のテストがまれに落ちる（一時ファイルの書き込み失敗）。`TMPDIR` を別ボリュームに向ければ安定する。
 
 ## 0. 診断 — 今の docs はなぜ読みにくいか
 

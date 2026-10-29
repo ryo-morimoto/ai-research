@@ -73,7 +73,7 @@ describe("P2 照合器が作る抜き書きは N(原文) の部分文字列（IN
   });
 });
 
-describe("P3 原文の部分文字列を引用すれば完全一致", () => {
+describe("P3 原文の部分文字列を引用すれば完全一致（Q-01）", () => {
   it("N(原文) の部分文字列は exact", () => {
     fc.assert(
       fc.property(text(1, 400), fc.nat(), fc.nat(), (src, a, b) => {
@@ -114,7 +114,7 @@ describe("P4 抜き書きの範囲の外を変えても照合は変わらない"
   });
 });
 
-describe("P5 段落選びは上限を守る", () => {
+describe("P5 段落選びは上限を守る（S-01）", () => {
   it("件数・出典ごとの件数・段落の長さ・合計トークン", () => {
     const para = fc.record({
       sourceId: fc.constantFrom("s1", "s2", "s3"),
@@ -153,7 +153,7 @@ describe("P5 段落選びは上限を守る", () => {
   });
 });
 
-describe("P6 予算は負にならず、上限を超えない（INV-9）", () => {
+describe("P6 予算は負にならず、上限を超えない（INV-9、R-01）", () => {
   it("どんな要求の列でも used ≤ cap、allowed ≤ want", () => {
     const phase = fc.constantFrom<Phase>("first", "continue", "deep");
     fc.assert(

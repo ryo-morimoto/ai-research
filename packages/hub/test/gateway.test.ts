@@ -120,7 +120,7 @@ describe("取得の出口（Gateway）", () => {
     expect((await upstreamLog()).some((l) => l.url.includes("/private/"))).toBe(false);
   });
 
-  it("拒まれた取得は blocked、遅い取得は timeout として返す", async () => {
+  it("P-02：拒まれた取得は blocked、遅い取得は timeout として返す", async () => {
     const g = new Gateway(env);
     expect(await g.fetchDoc("https://blocked.example.com/page")).toMatchObject({ ok: false, cutoff: { why: "blocked" } });
     expect(await g.fetchDoc("https://slow.example.com/page")).toMatchObject({ ok: false, cutoff: { why: "timeout" } });
@@ -149,7 +149,7 @@ describe("取得の出口（Gateway）", () => {
     expect(await new Gateway(env).fetchDoc("https://docs.example.com/paper.pdf")).toMatchObject({ ok: false, cutoff: { why: "unsupported" } });
   });
 
-  it("GitHub：コミット SHA を指紋にして raw を読む", async () => {
+  it("S-03：GitHub：コミット SHA を指紋にして raw を読む（要約を挟まない最速の経路）", async () => {
     const r = await new Gateway(env).fetchDoc("https://github.com/acme/tool/blob/main/README.md");
     expect(r.ok && "doc" in r && r.doc.fingerprint.commit).toBe("sha1");
     if (r.ok && "doc" in r) expect(r.doc.text).toContain("config.toml");

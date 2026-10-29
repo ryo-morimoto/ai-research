@@ -28,7 +28,7 @@
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| R-01 | **MUST** | 1回の依頼の消費トークンに上限があり、超える前に止めて知らせる | spec: specs/run.qnt<br>file: packages/core/test/properties.test.ts（P6・P8: 予算の性質（ID タグ未付与）） |
+| R-01 | **MUST** | 1回の依頼の消費トークンに上限があり、超える前に止めて知らせる | spec: specs/run.qnt<br>test: packages/core/test/properties.test.ts |
 | INV-9 | **MUST** | 使用量は段階の上限を超えない | spec: specs/run.qnt<br>test: packages/core/test/properties.test.ts、packages/hub/test/run.test.ts、packages/hub/test/trace.ts |
 
 ### conversation
@@ -47,8 +47,8 @@
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| S-03 | **MUST** | 原文の取得は、選べる経路のうち最も速いものに近い（要約を挟まない） | measure: 出典種別ごとの取得時間 |
-| P-02 | **MUST** | 取れない出典は時間上限で打ち切り、結果に示す。同じ失敗を同じ調査で繰り返さない | file: packages/hub/test/gateway.test.ts（故障注入の試験（ID タグ未付与）） |
+| S-03 | **MUST** | 原文の取得は、選べる経路のうち最も速いものに近い（要約を挟まない） | test: packages/hub/test/gateway.test.ts<br>measure: 出典種別ごとの取得時間 |
+| P-02 | **MUST** | 取れない出典は時間上限で打ち切り、結果に示す。同じ失敗を同じ調査で繰り返さない | test: packages/hub/test/gateway.test.ts |
 | E-04 | **MUST** | 依頼内容や私的な情報を、調査に必要な範囲を超えて外部に送らない | manual: 送信内容の記録（outbound_log）の点検 |
 
 ### hub
@@ -61,9 +61,9 @@
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| W-03 | **MUST** | 以前に確かめた事実は、出典が変わっていなければ読み直しに時間を使わない（機械・会話をまたいで） | file: packages/hub/test/ledger.test.ts（照らし直しの試験（ID タグ未付与））<br>measure: 2台試験 |
+| W-03 | **MUST** | 以前に確かめた事実は、出典が変わっていなければ読み直しに時間を使わない（機械・会話をまたいで） | test: packages/hub/test/run.test.ts<br>measure: 2台試験 |
 | Q-02 | **MUST** | 台帳から持ち込んだ事実を使った結果は、その場で取り直した場合と同じになる | test: packages/core/test/examples.test.ts、packages/hub/test/run.test.ts<br>spec: specs/ledger.qnt |
-| U-02 | **MUST** | 持ち込まれる事実を、利用者が直接読めて、消せる（1台で消せばどこからも消える） | spec: specs/ledger.qnt<br>file: packages/hub/test/ledger.test.ts（墓標の試験（INV-3 側で検査）） |
+| U-02 | **MUST** | 持ち込まれる事実を、利用者が直接読めて、消せる（1台で消せばどこからも消える） | spec: specs/ledger.qnt<br>test: packages/hub/test/ledger.test.ts |
 | INV-1 | **MUST** | 台帳のどのレコードも、抜き書きは確かめた時点の原文（正規化後）の部分文字列である | spec: specs/ledger.qnt<br>test: packages/core/test/properties.test.ts、packages/hub/test/mcp.test.ts<br>script: scripts/check-deps.mjs |
 | INV-2 | **MUST** | 台帳は追記のみ。既存レコードは変わらない（物理消去を除く） | spec: specs/ledger.qnt<br>test: packages/hub/test/ledger.test.ts |
 | INV-3 | **MUST** | 墓標の付いたレコード・出典は、以後のどの実行にも候補として返らない | spec: specs/ledger.qnt<br>test: packages/hub/test/ledger.test.ts |
@@ -73,14 +73,14 @@
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| Q-03 | **MUST NOT** | システムが作った文（要約・解釈・結論）を、次の調査の根拠として持ち込まない | file: scripts/check-deps.mjs（VerifiedExcerpt の生成特権（INV-1 側で検査））<br>file: specs/ledger.qnt（INV-1 の抽象形） |
+| Q-03 | **MUST NOT** | システムが作った文（要約・解釈・結論）を、次の調査の根拠として持ち込まない | script: scripts/check-deps.mjs<br>file: specs/ledger.qnt（INV-1 の抽象形） |
 | E-01 | **MUST** | 残す原文は確かめるのに必要な短い範囲に限り、出典を明示し、第三者に配布しない | test: packages/core/test/properties.test.ts、packages/hub/test/mcp.test.ts |
 
 ### limiter
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| E-02 | **MUST** | 取得先の規約と頻度制限を全機械の合計で守る。拒まれたら Retry-After だけ空ける | test: packages/hub/test/limiter.test.ts、packages/hub/test/route.test.ts<br>file: specs/limiter.qnt（INV-6・INV-7 のモデル） |
+| E-02 | **MUST** | 取得先の規約と頻度制限を全機械の合計で守る。拒まれたら Retry-After だけ空ける | test: packages/hub/test/limiter.test.ts、packages/hub/test/policy.test.ts、packages/hub/test/route.test.ts<br>spec: specs/limiter.qnt |
 | INV-6 | **MUST** | 同じホストへの取得の開始時刻は、全機械を通して最小間隔以上あく | spec: specs/limiter.qnt<br>test: packages/hub/test/limiter.test.ts |
 | INV-7 | **MUST** | 同じホストへの同時の取得は上限以下 | spec: specs/limiter.qnt<br>test: packages/hub/test/limiter.test.ts |
 
@@ -95,7 +95,7 @@
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| C-05 | **MUST** | 記録は本人だけが見られる（既存のコネクタの認証を通す） | file: packages/hub/test/mcp.test.ts（認証経由の呼び出し（ID タグ未付与）） |
+| C-05 | **MUST** | 記録は本人だけが見られる（既存のコネクタの認証を通す） | test: packages/hub/test/mcp.test.ts |
 
 ### mcp/budget
 
@@ -148,10 +148,10 @@
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
 | W-01 | **MUST** | 依頼から60秒以内に、向きを確かめられる最初の結果を出す | test: packages/hub/test/run.test.ts<br>measure: bench: 最初の結果まで P95 60秒 |
-| W-02 | **MUST** | 利用者が向きを変えたら以降の作業に反映し、外れた作業を続けない | spec: specs/run.qnt<br>file: packages/hub/test/run.test.ts（steer の試験（ID タグ未付与。INV-10 が近縁）） |
+| W-02 | **MUST** | 利用者が向きを変えたら以降の作業に反映し、外れた作業を続けない | spec: specs/run.qnt<br>test: packages/hub/test/run.test.ts |
 | W-04 | **MUST** | 4分を超える調査は、利用者が求めたとき（deepen）だけ行う | test: packages/hub/test/run.test.ts<br>spec: specs/run.qnt |
-| S-02 | **MUST** | 休憩やセッションの区切りを挟んでも、再開が大きく遅くならない | measure: 休憩後の最初の応答時間 |
-| P-01 | **MUST** | 並行する作業のうち遅いものが、他の結果の提示を止めない | file: packages/hub/test/run.test.ts（遅延・締め切りの試験（ID タグ未付与））<br>file: specs/run.qnt（有界応答のモデル（ID タグ未付与）） |
+| S-02 | **MUST** | 休憩やセッションの区切りを挟んでも、再開が大きく遅くならない | test: packages/hub/test/run.test.ts<br>measure: 休憩後の最初の応答時間（時間そのものは bench で測る） |
+| P-01 | **MUST** | 並行する作業のうち遅いものが、他の結果の提示を止めない | test: packages/hub/test/run.test.ts<br>file: specs/run.qnt（有界応答のモデル） |
 | P-06 | **MUST** | 作業が尽きたら待たせず終わる。0件のときは理由（見つからない/取れない/検索していない）が分かる | test: packages/hub/test/modes.test.ts |
 | Q-04 | **MUST** | 答えに影響した喪失は1件ずつ、それ以外は件数と URL で分かる。進行中は喪失と区別する | test: packages/hub/test/modes.test.ts |
 | INV-8 | **MUST** | 締め切りで終わっていない現在の版の作業は、done でなければ pending に、done なら cutoffs（gave_up）に必ず現れる | spec: specs/run.qnt<br>test: packages/hub/test/run.test.ts、packages/hub/test/trace.ts |
@@ -164,7 +164,7 @@
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| S-01 | **MUST** | 調査が長くなっても、1ステップあたりの時間と流入量が増え続けない | file: packages/core/test/properties.test.ts（P5: 段落選びの上限（ID タグ未付与））<br>measure: ステップ数に対する時間の推移 |
+| S-01 | **MUST** | 調査が長くなっても、1ステップあたりの時間と流入量が増え続けない | test: packages/core/test/properties.test.ts<br>measure: ステップ数に対する時間の推移 |
 
 ### run/route
 
@@ -182,7 +182,7 @@
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| E-03 | **MUST NOT** | 取得した内容に含まれる指示に従わない | file: packages/view/test/view.test.ts（textContent のみ（C-09 側で検査））<br>manual: 注入試験（半自動、M3） |
+| E-03 | **MUST NOT** | 取得した内容に含まれる指示に従わない | test: packages/view/test/view.test.ts<br>manual: 注入試験（半自動、M3） |
 
 ### scholarly
 
@@ -202,7 +202,7 @@
 |---|---|---|---|
 | V-04 | **MUST** | 取りこぼしの偏り（打ち切り・照合失敗をホスト・tier・kind ごとに）が見える | test: packages/hub/test/tracedo.test.ts、packages/view/test/view.test.ts |
 | V-06 | **MUST** | どの面から起こした調査も1か所に集まる | manual: TraceDO は1人に1つ（設計で満たす）。実機確認済 2026-10-26 |
-| V-09 | **MUST** | 調査の記録を本人が消せる | file: packages/hub/test/tracedo.test.ts（墓標の試験（C-08 側で検査）） |
+| V-09 | **MUST** | 調査の記録を本人が消せる | test: packages/hub/test/tracedo.test.ts |
 | V-10 | **MUST** | 手順の版の前後で取りこぼしの数を比べられる | test: packages/hub/test/tracedo.test.ts |
 | C-03 | **MUST** | 記録の書き込みは調査を遅くせず、失敗しても調査は失敗しない | test: packages/hub/test/tracedo.test.ts |
 | C-04 | **MUST NOT** | 原文の全文・段落の本文を記録に残さない | test: packages/core/test/trace.test.ts、packages/hub/test/tracedo.test.ts |
@@ -214,13 +214,13 @@
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
 | Q-06 | **MUST** | 会話の文脈に由来する内容を、確かめた事実として保存・持ち込みしない。会話から補った問いは結果に示す | test: packages/core/test/examples.test.ts、packages/core/test/properties.test.ts、packages/hub/test/run.test.ts |
-| INV-5 | **MUST** | 「引用確認済」の印は、その回に原文と照合できたものにだけ付く | spec: specs/ledger.qnt<br>file: packages/hub/test/run.test.ts（照合の試験（ID タグ未付与）） |
+| INV-5 | **MUST** | 「引用確認済」の印は、その回に原文と照合できたものにだけ付く | spec: specs/ledger.qnt<br>test: packages/hub/test/run.test.ts |
 
 ### verify/policy
 
 | ID | 強さ | 制約 | 検査 |
 |---|---|---|---|
-| Q-01 | **MUST** | 主張ごとに出典と照合の状態が分かる。状態は「引用が原文にあるか」だけを表す。ラベルの一覧は1か所で決める | file: packages/core/test/properties.test.ts（P3・P10: 照合の性質（ID タグ未付与）） |
+| Q-01 | **MUST** | 主張ごとに出典と照合の状態が分かる。状態は「引用が原文にあるか」だけを表す。ラベルの一覧は1か所で決める | test: packages/core/test/properties.test.ts、packages/hub/test/policy.test.ts<br>script: scripts/check-budget.mjs |
 
 ### view
 
@@ -229,7 +229,7 @@
 | V-01 | **MUST** | 記録を見るのにトークンをほぼ使わない（開く1回・50トークン以下。見る道は LLM・取得に依存しない） | test: packages/hub/test/mcp.test.ts<br>script: scripts/check-budget.mjs、scripts/check-deps.mjs |
 | V-02 | **MUST** | 1回の調査の流れが見える | test: packages/hub/test/tracedo.test.ts、packages/view/test/view.test.ts |
 | V-05 | **MUST** | 実行中の調査も start から1分以内に見える | test: packages/view/test/view.test.ts |
-| V-07 | **MUST** | スマートフォンで見られる | manual: 実機確認済（2026-10-26）<br>file: packages/view/test/view.test.ts（幅 375px の描画試験） |
+| V-07 | **MUST** | スマートフォンで見られる | manual: 実機確認済（2026-10-26。幅 375px の描画は headless Chromium の手元確認） |
 | V-08 | SHOULD | 台帳と行き来できる | manual: 実機確認 |
 | C-09 | **MUST** | 取得した文字列はデータとして扱う（View は textContent だけ） | test: packages/view/test/view.test.ts |
 | C-11 | **MUST NOT** | View からモデルへ書き戻さない | test: packages/view/test/view.test.ts |

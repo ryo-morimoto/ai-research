@@ -101,7 +101,7 @@ function b64url(bytes: ArrayBuffer | Uint8Array): string {
 }
 
 describe("OAuth", () => {
-  it("トークンなしの /mcp は 401 で、資源のメタデータを示す", async () => {
+  it("C-05：トークンなしの /mcp は 401 で、資源のメタデータを示す（記録も台帳も認証の内側）", async () => {
     const r = await rpc("tools/list", {}, { via: "self" });
     expect(r.status).toBe(401);
     const www = r.res.headers.get("WWW-Authenticate") ?? "";

@@ -240,6 +240,21 @@ export const INPUT_BOUNDS = {
   sourceMaxChars: 2_000,
 } as const;
 
+/**
+ * 経路外の理由の一覧（Q-01：結果に書くラベルは1か所で決める）。
+ * 結果には「経路外（<理由>）」の形で書く。ここにない理由の直書きは scripts/check-budget.mjs が落とす
+ */
+export const OFF_PATH_REASONS = [
+  "利用者の指定",
+  "ai-research で取れなかった",
+  "ai-research が使えない",
+  "ai-research で検索できなかった",
+  "ai-research に届かなかった",
+  "ai-research の内部の失敗",
+] as const;
+export type OffPathReason = (typeof OFF_PATH_REASONS)[number];
+export const offPath = (reason: OffPathReason) => `経路外（${reason}）`;
+
 /** 止めるときにモデルへ返す理由（ツールのエラーとして返る） */
 export const ROUTE_DENY_REASON = `この利用者の調べものは ai-research を通します（組み込みのウェブ検索・取得は止めています）。
 ai-research の code 道具（名前に ai-research と code を含む MCP の道具。遅延読み込みならツール検索で "ai-research" を探して読み込む）を使ってください。
@@ -250,8 +265,8 @@ URL を読む：
   async () => research.start({ question: "解釈した問い", mode: "lookup", urls: ["https://…"] })
 論文・研究の知見：sources: ["scholarly", "web"] を足す。
 
-ai-research で取れなかった URL（cutoffs の ${POLICY.routing.cutoffAllowReasons.join(" / ")}。urls を含む）は、このあと WebFetch で読めます。pending は取れなかったものではありません。結果には「経路外（ai-research で取れなかった）」と書いてください。
-ツール検索で ai-research が見つからないときは、このあと組み込みのウェブ検索・取得を使えます。結果には「経路外（ai-research が使えない）」と書いてください。
+ai-research で取れなかった URL（cutoffs の ${POLICY.routing.cutoffAllowReasons.join(" / ")}。urls を含む）は、このあと WebFetch で読めます。pending は取れなかったものではありません。結果には「${offPath("ai-research で取れなかった")}」と書いてください。
+ツール検索で ai-research が見つからないときは、このあと組み込みのウェブ検索・取得を使えます。結果には「${offPath("ai-research が使えない")}」と書いてください。
 利用者がウェブ検索を明示したときだけ、組み込みのウェブ検索を使えます。`;
 
 /**
@@ -263,10 +278,10 @@ export const VIEW_OPEN_TEXT = "表示しました";
 
 /** 通すときにモデルへ添える文（Q-07） */
 export const ROUTE_ALLOW_CONTEXT = {
-  explicit: "利用者がウェブ検索を明示したので、組み込みの道具で調べます。結果には「経路外（利用者の指定）」と書き、引用確認済のラベルは付けないでください。",
-  cutoff: "ai-research で取れなかった URL なので、組み込みの取得で読みます。結果には「経路外（ai-research で取れなかった）」と書き、引用確認済のラベルは付けないでください。",
-  noConnector: "この会話では ai-research の道具が見つからなかったので、組み込みの道具で調べます。結果には「経路外（ai-research が使えない）」と書き、引用確認済のラベルは付けないでください。",
-  searchDown: "ai-research の検索が使えなかったので、組み込みの検索で調べます。結果には「経路外（ai-research で検索できなかった）」と書き、引用確認済のラベルは付けないでください。",
+  explicit: `利用者がウェブ検索を明示したので、組み込みの道具で調べます。結果には「${offPath("利用者の指定")}」と書き、引用確認済のラベルは付けないでください。`,
+  cutoff: `ai-research で取れなかった URL なので、組み込みの取得で読みます。結果には「${offPath("ai-research で取れなかった")}」と書き、引用確認済のラベルは付けないでください。`,
+  noConnector: `この会話では ai-research の道具が見つからなかったので、組み込みの道具で調べます。結果には「${offPath("ai-research が使えない")}」と書き、引用確認済のラベルは付けないでください。`,
+  searchDown: `ai-research の検索が使えなかったので、組み込みの検索で調べます。結果には「${offPath("ai-research で検索できなかった")}」と書き、引用確認済のラベルは付けないでください。`,
 } as const;
 
 /** verify の理由ごとの次の手（設計 v1.5 §8.3.7） */
@@ -286,8 +301,8 @@ export const VERIFY_NEXT = {
  */
 export const EMPTY_NEXT = {
   no_hits: "検索語を変えて research.steer を呼ぶ（論文・研究の知見なら sources: [\"scholarly\"]）。2回続けて0件なら、0件だったと利用者に伝える。",
-  search_failed: "検索が使えなかった（cutoffs を参照）。組み込みのウェブ検索で調べてよい。結果には「経路外（ai-research で検索できなかった）」と書く。",
-  all_failed: "見つけた出典をすべて取得できなかった。cutoffs の URL（urls を含む）は WebFetch で読んでよい。結果には「経路外（ai-research で取れなかった）」と書く。",
+  search_failed: `検索が使えなかった（cutoffs を参照）。組み込みのウェブ検索で調べてよい。結果には「${offPath("ai-research で検索できなかった")}」と書く。`,
+  all_failed: `見つけた出典をすべて取得できなかった。cutoffs の URL（urls を含む）は WebFetch で読んでよい。結果には「${offPath("ai-research で取れなかった")}」と書く。`,
   not_relevant: "取得した出典に、問いと関係のある段落がなかった。cutoffs の no_passage の出典は research.find で語句を探せる。検索語を変えるなら research.steer。",
   still_running: "まだ集めている。research.next を待つ。",
 } as const;

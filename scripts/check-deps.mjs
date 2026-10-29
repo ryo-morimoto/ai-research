@@ -2,7 +2,7 @@
 /**
  * 依存の規則（docs/03 §2.1、§3.3-4）
  *
- * 1. VerifiedExcerpt を作れるのは packages/core/src/verify.ts だけ
+ * 1. VerifiedExcerpt を作れるのは packages/core/src/verify.ts だけ（Q-03：システムが作った文を事実として持ち込ませない）
  *    （`as VerifiedExcerpt` や `as unknown as VerifiedExcerpt` を他で書かない）
  * 2. packages/core は他のワークスペースのパッケージにも Cloudflare の API にも依存しない
  * 3. 台帳への追記（appendVerified）を呼べるのは hub の ledger モジュールと run モジュールだけ

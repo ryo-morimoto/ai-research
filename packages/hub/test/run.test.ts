@@ -30,7 +30,7 @@ async function trace(stub: DurableObjectStub<RunDO>) {
 const passageWith = (b: Bundle, s: string) => b.passages.find((p) => p.text.includes(s));
 
 describe("調査の実行（RunDO）", () => {
-  it("W-01：締め切りまでに最初の束を返す。拒まれた取得は打ち切りとして見える", async () => {
+  it("W-01・P-01：締め切りまでに最初の束を返す（遅い取得が提示を止めない）。拒まれた取得は打ち切りとして見える", async () => {
     const { id, stub } = newRun();
     const t0 = Date.now();
     const b = await stub.start(id, { mode: "survey", question: "取得先の制限は", queries: ["limits"] });
@@ -62,7 +62,7 @@ describe("調査の実行（RunDO）", () => {
     expect(t.bundles).toBe(2);
   });
 
-  it("INV-10：方向を変えたら、古い版の段落を返さない。古い版の段落でも、原文にある引用は照合できる（設計 v1.5 §8.3.7）", async () => {
+  it("INV-10・W-02：方向を変えたら、古い版の段落を返さない。古い版の段落でも、原文にある引用は照合できる（設計 v1.5 §8.3.7）", async () => {
     const { id, stub } = newRun();
     const b1 = await stub.start(id, { mode: "survey", question: "プロンプトキャッシュ", queries: ["cache"] });
     const old = passageWith(b1, "前置きが完全に一致")!;
@@ -180,7 +180,7 @@ describe("調査の実行（RunDO）", () => {
     await trace(stub);
   });
 
-  it("INV-13：退避しても原文の全文はストレージに残っていない。退避後も引用は照合できる", async () => {
+  it("INV-13・S-02：退避しても原文の全文はストレージに残っていない。退避後（＝区切りの後の再開）も引用は照合できる", async () => {
     const { id, stub } = newRun();
     const b = await stub.start(id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });
     const p = passageWith(b, "3秒に1回")!;
@@ -207,7 +207,7 @@ describe("調査の実行（RunDO）", () => {
     expect(v.statuses[0]).toMatchObject({ status: "引用確認済" });
   });
 
-  it("Q-02：台帳の抜き書きを照らし直す（変わっていなければ引用確認済、消えていれば照合失敗）", async () => {
+  it("Q-02・W-03・INV-5：台帳の抜き書きを照らし直す（変わっていなければ引用確認済、消えていれば照合失敗）", async () => {
     // 1回目：照合して台帳に入れる
     const a = newRun();
     const b = await a.stub.start(a.id, { mode: "survey", question: "取得先の制限", queries: ["limits"] });

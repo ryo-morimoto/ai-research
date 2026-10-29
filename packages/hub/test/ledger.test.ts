@@ -33,7 +33,7 @@ describe("台帳（LedgerDO）", () => {
     expect((await l.search("機械の合計", { snapshotSeq: await l.currentSeq(), limit: 5 })).length).toBe(1);
   });
 
-  it("INV-3：墓標の付いたものは以降の検索に出ない。墓標の前の版の snapshot には出る", async () => {
+  it("INV-3・U-02：墓標の付いたものは以降の検索に出ない。墓標の前の版の snapshot には出る", async () => {
     const l = ledger();
     const { recordId } = await l.appendVerified(excerptFrom(TEXT, "3秒に1回"), "normal", "r1");
     const before = await l.currentSeq();

@@ -7,9 +7,9 @@
  *
  * 実行：node --experimental-strip-types scripts/check-budget.mjs
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const policy = await import(join(root, "packages/policy/src/index.ts"));
@@ -58,7 +58,35 @@ const VERSION_CHECKS = [
   { name: "PostToolUse は ToolSearch だけ（道具の結果を送らせない。E-05）", ok: (hooks.hooks.PostToolUse ?? []).every((m) => m.matcher === "ToolSearch") },
 ];
 
+// ラベルは1か所（Q-01）：「経路外（<理由>）」の理由は policy.OFF_PATH_REASONS の一覧だけ。
+// 「理由」はひな形（経路外（理由））として許す
+const allowedReasons = new Set([...policy.OFF_PATH_REASONS, "理由", "<理由>", "${reason}"]);
+function walk(dir) {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    if (name === "node_modules" || name.startsWith(".")) continue;
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...walk(p));
+    else if (/\.(ts|mts|md)$/.test(name)) out.push(p);
+  }
+  return out;
+}
+const labelFiles = [...walk(join(root, "packages")), ...walk(join(root, "plugins"))];
+const LABEL_ERRORS = [];
+for (const f of labelFiles) {
+  if (f.includes("/test/")) continue;
+  const text = readFileSync(f, "utf8");
+  for (const m of text.matchAll(/経路外（([^）]+)）/g)) {
+    if (!allowedReasons.has(m[1])) LABEL_ERRORS.push(`${relative(root, f)}: 一覧にない経路外の理由「${m[1]}」（Q-01。policy の OFF_PATH_REASONS に足すか、一覧の語を使う）`);
+  }
+}
+
 let failed = 0;
+for (const e of LABEL_ERRORS) {
+  failed++;
+  console.log(`FAIL ${e}`);
+}
+if (LABEL_ERRORS.length === 0) console.log("ok   経路外のラベルは一覧（OFF_PATH_REASONS）の中だけ（Q-01）");
 for (const c of VERSION_CHECKS) {
   if (!c.ok) failed++;
   console.log(`${c.ok ? "ok  " : "FAIL"} ${c.name}`);

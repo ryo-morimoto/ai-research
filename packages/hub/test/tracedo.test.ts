@@ -117,7 +117,7 @@ describe("調査の記録（TraceDO）", () => {
     expect(await tr().runs()).toEqual([]);
   });
 
-  it("C-08：取り消すと読み取りに出ない。遅れて届いた事象も捨てる。墓標は書き出しに残る", async () => {
+  it("C-08・V-09：取り消すと読み取りに出ない。遅れて届いた事象も捨てる。墓標は書き出しに残る", async () => {
     const { id, stub } = newRun();
     await stub.start(id, { mode: "survey", question: "取得先の制限は", queries: ["limits"] });
     await eventsUntil(id, has("passage.selected"));

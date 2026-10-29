@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { INPUT_BOUNDS as B } from "@ai-research/policy";
+import { INPUT_BOUNDS as B, offPath } from "@ai-research/policy";
 import type { ClaimInput, HubError, HubErrorCode, Notice, QuestionInput } from "@ai-research/sandbox-api";
 
 /**
@@ -64,10 +64,10 @@ export function parse<T>(schema: z.ZodType<T>, value: unknown, what: string): T 
 }
 
 const NEXT: Record<HubErrorCode, string> = {
-  busy: "数秒おいて同じ呼び出しをもう一度してください。続けて失敗したら、組み込みの道具で調べ、答えの最後に「経路外（ai-research に届かなかった）」と書いてください。",
+  busy: `数秒おいて同じ呼び出しをもう一度してください。続けて失敗したら、組み込みの道具で調べ、答えの最後に「${offPath("ai-research に届かなかった")}」と書いてください。`,
   run_not_found: "research.start からやり直してください。",
   bad_input: "message のとおりに値を直して、もう一度呼んでください。",
-  internal: "組み込みの道具で調べ、答えの最後に「経路外（ai-research の内部の失敗）」と書いてください。",
+  internal: `組み込みの道具で調べ、答えの最後に「${offPath("ai-research の内部の失敗")}」と書いてください。`,
 };
 
 /** Durable Object とランタイムの失敗の文から、種別を決める */
