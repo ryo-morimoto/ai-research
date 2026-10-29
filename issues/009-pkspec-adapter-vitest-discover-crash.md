@@ -22,14 +22,21 @@ created: 2026-10-30
 
 ## 仮説
 
-- 確度 中：discover の一覧取得が vitest の特定の出力・設定（プールの違い、list の出力形）を前提にしており、
-  core 側の形で落ちる。反証するには、最小の vitest プロジェクト（素の vitest のみ）で discover を実行して
-  再現するかを見る。
-- これは drift 分類では `harness-drift`（検査の道具の側の不具合）。検査の性質は変えない。
+- ~~確度 中：素の vitest（workerd プールなし）だと落ちる~~ **反証済み（2026-10-30）**：
+  vitest 4.1.12 だけの最小プロジェクト（1ファイル1テスト）では discover は成功した。
+- 切り分けの観測（2026-10-30）：
+  - packages/core：**決定的に再現**（2回とも exit 134 = SIGABRT、出力 0 バイト）
+  - packages/hub（workerd プール）・packages/view（素の vitest、同じモノレポ・同じ vitest 版）：成功
+  - `vitest list` 自体は core で成功する → 落ちているのは vitest ではなく**シム（MoonBit バイナリ）の discover 処理**
+- 確度 中（更新後）：core のテスト収集の出力・内容の何か（候補：fast-check を import する5ファイル、
+  テスト名に含まれる記号 ≤・×・=== など）をシムが処理するところで abort する。
+  反証するには、core のテストファイルを1つずつ含めて discover を回し、落ちる最小の組を見つける。
+- drift 分類は `harness-drift`（検査の道具の側の不具合）。検査の性質は変えない。
 
 ## 次の一手
 
-- 最小再現を作り、再現したら上流（mizchi/pkspec）に報告する（**外部への報告は利用者の了承を得てから**）。
+- core のテストファイルを1つずつ含めた切り分けで最小再現を絞り、上流（mizchi/pkspec）に報告する
+  （**外部への報告は利用者の了承を得てから**。切り分けデータは上の観測のとおり揃っている）。
 - 影響：pkspec は唯一の正の検査器になった（adr/0001 の利用者決定 2026-10-30）が、落ちるのは
   adapter シムの discover だけで、check・exec・spec・coverage と run は動く。overlay の実行
   （scripts/run-overlays.mjs）では core の discover 照合を省略して run で検証している。

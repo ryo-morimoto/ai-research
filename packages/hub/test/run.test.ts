@@ -36,8 +36,17 @@ describe("調査の実行（RunDO）", () => {
     const b = await stub.start(id, { mode: "survey", question: "取得先の制限は", queries: ["limits"] });
     expect(Date.now() - t0).toBeLessThan(25_000 * scale + 300);
     expect(b.question.version).toBe(1);
-    expect(passageWith(b, "3秒に1回")).toBeDefined();
-    expect(b.cutoffs.some((c) => c.why === "blocked")).toBe(true);
+    // W-01 は「締め切りで束が返る」こと（上の1行）。中身は負荷で続きにずれてよい（P-01）ので、done まで集めて確かめる
+    let cur = b;
+    const passages = [...b.passages];
+    const cutoffs = [...b.cutoffs];
+    while (!cur.done) {
+      cur = await stub.next(50_000);
+      passages.push(...cur.passages);
+      cutoffs.push(...cur.cutoffs);
+    }
+    expect(passages.some((p) => p.text.includes("3秒に1回"))).toBe(true);
+    expect(cutoffs.some((c) => c.why === "blocked")).toBe(true);
     // C-02：禁止の取得先には要求を出していない
     expect((await upstreamLog()).some((l) => l.url.includes("youtube"))).toBe(false);
     const m = (await inspect(stub)).meta!;
